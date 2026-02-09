@@ -69,14 +69,42 @@ tasks:
   install:syft:
     desc: "Install Syft (SBOM generator)"
     cmds:
-      - curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+      - |
+        for i in 1 2 3; do
+          echo "Attempt $i to install syft..."
+          if curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin; then
+            echo "✅ Syft installed successfully"
+            break
+          else
+            echo "⚠️  Attempt $i failed, retrying in 5 seconds..."
+            sleep 5
+          fi
+          if [ $i -eq 3 ]; then
+            echo "❌ Failed to install syft after 3 attempts"
+            exit 1
+          fi
+        done
     status:
       - which syft
 
   install:grype:
     desc: "Install Grype (vulnerability scanner)"
     cmds:
-      - curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+      - |
+        for i in 1 2 3; do
+          echo "Attempt $i to install grype..."
+          if curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin; then
+            echo "✅ Grype installed successfully"
+            break
+          else
+            echo "⚠️  Attempt $i failed, retrying in 5 seconds..."
+            sleep 5
+          fi
+          if [ $i -eq 3 ]; then
+            echo "❌ Failed to install grype after 3 attempts"
+            exit 1
+          fi
+        done
     status:
       - which grype
 
@@ -84,7 +112,20 @@ tasks:
     desc: "Install Trivy (multi-purpose scanner)"
     cmds:
       - |
-        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+        for i in 1 2 3; do
+          echo "Attempt $i to install trivy..."
+          if curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin; then
+            echo "✅ Trivy installed successfully"
+            break
+          else
+            echo "⚠️  Attempt $i failed, retrying in 5 seconds..."
+            sleep 5
+          fi
+          if [ $i -eq 3 ]; then
+            echo "❌ Failed to install trivy after 3 attempts"
+            exit 1
+          fi
+        done
     status:
       - which trivy
 
