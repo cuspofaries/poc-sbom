@@ -84,13 +84,15 @@ echo "── Attestation unavailable, falling back to blob signing ──"
 echo "   (image not pushed to registry, or registry unreachable)"
 
 if [ -f "$COSIGN_KEY" ]; then
+    # Use bundle format (newer cosign versions) and rename to .sig for compatibility
     COSIGN_PASSWORD="" cosign sign-blob \
         --key "$COSIGN_KEY" \
-        --output-signature "${SBOM_FILE}.sig" \
-        --old-bundle-format \
+        --bundle "${SBOM_FILE}.bundle" \
         "$SBOM_FILE" --yes
+    # Create a .sig file for backward compatibility (copy of bundle)
+    cp "${SBOM_FILE}.bundle" "${SBOM_FILE}.sig" 2>/dev/null || true
     echo ""
-    echo "✅ SBOM signed as blob → ${SBOM_FILE}.sig"
+    echo "✅ SBOM signed as blob → ${SBOM_FILE}.bundle"
     echo "   ℹ️  For stronger guarantees, push image to registry and use: task sbom:attest"
 
 elif [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -n "${SYSTEM_OIDCREQUESTURI:-}" ]; then
