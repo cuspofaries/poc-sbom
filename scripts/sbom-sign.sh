@@ -87,6 +87,7 @@ if [ -f "$COSIGN_KEY" ]; then
     COSIGN_PASSWORD="" cosign sign-blob \
         --key "$COSIGN_KEY" \
         --output-signature "${SBOM_FILE}.sig" \
+        --old-bundle-format \
         "$SBOM_FILE" --yes
     echo ""
     echo "✅ SBOM signed as blob → ${SBOM_FILE}.sig"
