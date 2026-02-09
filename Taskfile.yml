@@ -95,7 +95,9 @@ tasks:
         COSIGN_VERSION=$(curl -sL https://api.github.com/repos/sigstore/cosign/releases/latest | grep tag_name | cut -d '"' -f4)
         curl -sLO "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
         chmod +x cosign-linux-amd64
-        sudo mv cosign-linux-amd64 /usr/local/bin/cosign
+        mv cosign-linux-amd64 cosign
+        sudo install -m 755 cosign /usr/local/bin/cosign
+        rm -f cosign
     status:
       - which cosign
 
@@ -110,8 +112,10 @@ tasks:
     desc: "Install OPA (policy engine)"
     cmds:
       - |
-        curl -sL -o /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
-        chmod +x /usr/local/bin/opa
+        curl -sL -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
+        chmod +x opa
+        sudo install -m 755 opa /usr/local/bin/opa
+        rm -f opa
     status:
       - which opa
 
@@ -121,8 +125,9 @@ tasks:
       - |
         ORAS_VERSION=$(curl -sL https://api.github.com/repos/oras-project/oras/releases/latest | grep tag_name | cut -d '"' -f4 | sed 's/v//')
         curl -sLO "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
-        tar -xzf oras_${ORAS_VERSION}_linux_amd64.tar.gz -C /usr/local/bin oras
-        rm -f oras_${ORAS_VERSION}_linux_amd64.tar.gz
+        tar -xzf oras_${ORAS_VERSION}_linux_amd64.tar.gz
+        sudo install -m 755 oras /usr/local/bin/oras
+        rm -f oras_${ORAS_VERSION}_linux_amd64.tar.gz oras
     status:
       - which oras
 
