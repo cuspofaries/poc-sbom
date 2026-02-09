@@ -418,7 +418,7 @@ tasks:
     cmds:
       - docker compose -f docker-compose.dtrack.yml up -d
       - echo "✅ Dependency-Track starting → http://localhost:8081"
-      - echo "   Default credentials: admin / admin"
+      - echo "   Default credentials - admin / admin"
       - echo "   ⏳ First startup takes 2-3 minutes..."
 
   dtrack:down:
