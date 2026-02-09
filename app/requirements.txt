@@ -1,0 +1,28 @@
+# =============================================================================
+# Dependencies chosen for SBOM richness and vulnerability testing
+# Some are intentionally pinned to older versions to trigger CVEs in scans
+# =============================================================================
+
+# Web framework (large dependency tree)
+flask==3.0.0
+
+# HTTP client
+requests==2.31.0
+
+# YAML parsing
+pyyaml==6.0.1
+
+# Crypto (large native dependency tree, good for SBOM depth)
+cryptography==41.0.0
+
+# Data validation
+pydantic==2.5.0
+
+# Database driver (adds OS-level deps via libpq)
+psycopg2-binary==2.9.9
+
+# Intentionally older for vuln testing
+jinja2==3.1.2
+urllib3==2.0.4
+certifi==2023.7.22
+pillow==10.0.0

@@ -1,0 +1,504 @@
+version: '3'
+
+# ============================================================================
+# Supply Chain Security POC - SBOM Toolchain
+# ============================================================================
+# Usage:
+#   task install               → Install all tools
+#   task build                 → Build sample app image
+#   task sbom:generate:source  → Generate source SBOM (declared deps)
+#   task sbom:generate:image   → Generate image SBOM (shipped content)
+#   task sbom:generate         → Generate both source + image SBOMs
+#   task sbom:diff             → Compare source vs image SBOMs
+#   task sbom:attest           → Attest SBOM to image digest (requires registry)
+#   task sbom:sign:blob        → Sign SBOM as standalone file (no registry)
+#   task sbom:verify           → Verify SBOM integrity & signature
+#   task sbom:scan             → Scan for vulnerabilities
+#   task sbom:policy           → Enforce OPA policies
+#   task sbom:upload           → Upload to Dependency-Track
+#   task pipeline              → Full pipeline (generate → sign → scan → policy)
+#   task dtrack:up             → Start Dependency-Track stack
+#   task benchmark             → Run comparative benchmark of all tools
+#   task clean                 → Cleanup generated files
+# ============================================================================
+
+vars:
+  # -- Image --
+  REGISTRY: '{{.REGISTRY | default "localhost:5000"}}'
+  IMAGE_NAME: '{{.IMAGE_NAME | default "supply-chain-poc"}}'
+  IMAGE_TAG: '{{.IMAGE_TAG | default "latest"}}'
+  IMAGE: '{{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}'
+
+  # -- SBOM --
+  SBOM_FORMAT: cyclonedx-json
+  SBOM_DIR: ./output/sbom
+  SCAN_DIR: ./output/scans
+  BENCHMARK_DIR: ./output/benchmark
+
+  # -- Dependency-Track --
+  DTRACK_URL: '{{.DTRACK_URL | default "http://localhost:8081"}}'
+  DTRACK_API_KEY: '{{.DTRACK_API_KEY | default ""}}'
+  DTRACK_PROJECT: '{{.DTRACK_PROJECT | default "supply-chain-poc"}}'
+
+  # -- Signing --
+  COSIGN_KEY: ./cosign.key
+  COSIGN_PUB: ./cosign.pub
+
+env:
+  COSIGN_EXPERIMENTAL: "1"
+
+tasks:
+
+  # ==========================================================================
+  # SETUP
+  # ==========================================================================
+
+  install:
+    desc: "Install all SBOM tools"
+    cmds:
+      - task: install:syft
+      - task: install:grype
+      - task: install:trivy
+      - task: install:cosign
+      - task: install:cdxgen
+      - task: install:opa
+      - task: install:oras
+      - echo "✅ All tools installed"
+      - task: install:verify
+
+  install:syft:
+    desc: "Install Syft (SBOM generator)"
+    cmds:
+      - curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+    status:
+      - which syft
+
+  install:grype:
+    desc: "Install Grype (vulnerability scanner)"
+    cmds:
+      - curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+    status:
+      - which grype
+
+  install:trivy:
+    desc: "Install Trivy (multi-purpose scanner)"
+    cmds:
+      - |
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+    status:
+      - which trivy
+
+  install:cosign:
+    desc: "Install Cosign (signing)"
+    cmds:
+      - |
+        COSIGN_VERSION=$(curl -sL https://api.github.com/repos/sigstore/cosign/releases/latest | grep tag_name | cut -d '"' -f4)
+        curl -sLO "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+        chmod +x cosign-linux-amd64
+        sudo mv cosign-linux-amd64 /usr/local/bin/cosign
+    status:
+      - which cosign
+
+  install:cdxgen:
+    desc: "Install cdxgen (source SBOM generator)"
+    cmds:
+      - npm install -g @cyclonedx/cdxgen
+    status:
+      - which cdxgen
+
+  install:opa:
+    desc: "Install OPA (policy engine)"
+    cmds:
+      - |
+        curl -sL -o /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
+        chmod +x /usr/local/bin/opa
+    status:
+      - which opa
+
+  install:oras:
+    desc: "Install ORAS (OCI artifact push)"
+    cmds:
+      - |
+        ORAS_VERSION=$(curl -sL https://api.github.com/repos/oras-project/oras/releases/latest | grep tag_name | cut -d '"' -f4 | sed 's/v//')
+        curl -sLO "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+        tar -xzf oras_${ORAS_VERSION}_linux_amd64.tar.gz -C /usr/local/bin oras
+        rm -f oras_${ORAS_VERSION}_linux_amd64.tar.gz
+    status:
+      - which oras
+
+  install:verify:
+    desc: "Verify all tools are installed"
+    cmds:
+      - |
+        echo "=== Tool Versions ==="
+        echo -n "syft:   " && syft version 2>/dev/null | head -1 || echo "❌ NOT INSTALLED"
+        echo -n "grype:  " && grype version 2>/dev/null | head -1 || echo "❌ NOT INSTALLED"
+        echo -n "trivy:  " && trivy version 2>/dev/null | head -1 || echo "❌ NOT INSTALLED"
+        echo -n "cosign: " && cosign version 2>/dev/null | head -1 || echo "❌ NOT INSTALLED"
+        echo -n "cdxgen: " && cdxgen --version 2>/dev/null || echo "❌ NOT INSTALLED"
+        echo -n "opa:    " && opa version 2>/dev/null | head -1 || echo "❌ NOT INSTALLED"
+        echo -n "oras:   " && oras version 2>/dev/null | head -1 || echo "❌ NOT INSTALLED"
+
+  # ==========================================================================
+  # BUILD
+  # ==========================================================================
+
+  build:
+    desc: "Build sample application image"
+    cmds:
+      - docker build -t {{.IMAGE}} ./app
+      - echo "✅ Image built → {{.IMAGE}}"
+
+  registry:start:
+    desc: "Start local OCI registry (for testing)"
+    cmds:
+      - docker run -d -p 5000:5000 --name registry registry:2 2>/dev/null || true
+      - echo "✅ Local registry running on localhost:5000"
+
+  registry:push:
+    desc: "Push image to local registry"
+    deps: [registry:start]
+    cmds:
+      - docker push {{.IMAGE}}
+      - echo "✅ Image pushed → {{.IMAGE}}"
+
+  # ==========================================================================
+  # SBOM GENERATION — SOURCE (declared dependencies)
+  # ==========================================================================
+  # Source SBOMs answer: "what does my code declare as dependencies?"
+  # Generated BEFORE or DURING build, from manifests (requirements.txt, etc.)
+  # ==========================================================================
+
+  sbom:generate:source:
+    desc: "Generate source SBOM (declared deps) — default: cdxgen"
+    cmds:
+      - mkdir -p {{.SBOM_DIR}}/source
+      - ./scripts/sbom-generate-source.sh ./app {{.SBOM_DIR}}/source
+      - echo "✅ Source SBOMs → {{.SBOM_DIR}}/source/"
+
+  sbom:generate:source:cdxgen:
+    desc: "Generate source SBOM with cdxgen"
+    cmds:
+      - mkdir -p {{.SBOM_DIR}}/source
+      - cdxgen -o {{.SBOM_DIR}}/source/sbom-source-cdxgen.json ./app
+      - echo "✅ Source SBOM (cdxgen) → {{.SBOM_DIR}}/source/sbom-source-cdxgen.json"
+
+  sbom:generate:source:trivy:
+    desc: "Generate source SBOM with Trivy fs mode"
+    cmds:
+      - mkdir -p {{.SBOM_DIR}}/source
+      - |
+        trivy fs ./app \
+          --format cyclonedx \
+          --output {{.SBOM_DIR}}/source/sbom-source-trivy.json
+      - echo "✅ Source SBOM (trivy) → {{.SBOM_DIR}}/source/sbom-source-trivy.json"
+
+  sbom:generate:source:syft:
+    desc: "Generate source SBOM with Syft dir mode"
+    cmds:
+      - mkdir -p {{.SBOM_DIR}}/source
+      - |
+        syft dir:./app \
+          -o cyclonedx-json={{.SBOM_DIR}}/source/sbom-source-syft.json
+      - echo "✅ Source SBOM (syft) → {{.SBOM_DIR}}/source/sbom-source-syft.json"
+
+  # ==========================================================================
+  # SBOM GENERATION — IMAGE (what's actually shipped)
+  # ==========================================================================
+  # Image SBOMs answer: "what's really inside my container?"
+  # Generated AFTER build, from the final container image.
+  # Includes OS packages, system libs — everything embedded.
+  # ==========================================================================
+
+  sbom:generate:image:
+    desc: "Generate image SBOM (shipped content) — default: Syft"
+    cmds:
+      - mkdir -p {{.SBOM_DIR}}/image
+      - |
+        syft {{.IMAGE}} \
+          -o cyclonedx-json={{.SBOM_DIR}}/image/sbom-image-syft.json \
+          -o spdx-json={{.SBOM_DIR}}/image/sbom-image-syft-spdx.json
+      - echo "✅ Image SBOM (syft) → {{.SBOM_DIR}}/image/sbom-image-syft.json"
+
+  sbom:generate:image:trivy:
+    desc: "Generate image SBOM with Trivy"
+    cmds:
+      - mkdir -p {{.SBOM_DIR}}/image
+      - |
+        trivy image {{.IMAGE}} \
+          --format cyclonedx \
+          --output {{.SBOM_DIR}}/image/sbom-image-trivy.json
+      - echo "✅ Image SBOM (trivy) → {{.SBOM_DIR}}/image/sbom-image-trivy.json"
+
+  sbom:generate:image:syft:
+    desc: "Generate image SBOM with Syft (alias for default)"
+    cmds:
+      - task: sbom:generate:image
+
+  sbom:generate:image:docker:
+    desc: "Generate image SBOM via Docker BuildKit (native)"
+    cmds:
+      - mkdir -p {{.SBOM_DIR}}/image/buildkit
+      - |
+        DOCKER_BUILDKIT=1 docker buildx build \
+          --sbom=true \
+          --provenance=true \
+          --tag {{.IMAGE}} \
+          --output type=local,dest={{.SBOM_DIR}}/image/buildkit \
+          ./app
+      - echo "✅ BuildKit SBOM → {{.SBOM_DIR}}/image/buildkit/"
+
+  # ==========================================================================
+  # SBOM GENERATION — ALL (benchmark mode)
+  # ==========================================================================
+
+  sbom:generate:
+    desc: "Generate both source + image SBOM (default tools)"
+    cmds:
+      - task: sbom:generate:source
+      - task: sbom:generate:image
+      - echo "✅ Source + Image SBOMs generated"
+
+  sbom:generate:all:
+    desc: "Generate SBOMs with ALL tools (for benchmarking)"
+    cmds:
+      - task: sbom:generate:source:cdxgen
+      - task: sbom:generate:source:trivy
+      - task: sbom:generate:source:syft
+      - task: sbom:generate:image
+      - task: sbom:generate:image:trivy
+      - echo "✅ All SBOMs generated (source + image, all tools)"
+
+  # ==========================================================================
+  # SBOM DIFF — Source vs Image
+  # ==========================================================================
+
+  sbom:diff:
+    desc: "Compare source SBOM vs image SBOM (what's declared vs what's shipped)"
+    cmds:
+      - ./scripts/sbom-diff-source-image.sh {{.SBOM_DIR}}
+
+  # ==========================================================================
+  # SBOM SIGNING & ATTESTATION
+  # ==========================================================================
+  # Priority order:
+  #   1. cosign attest (links SBOM to image digest — strongest guarantee)
+  #   2. cosign sign-blob (standalone signature — when no registry available)
+  # ==========================================================================
+
+  signing:init:
+    desc: "Generate Cosign keypair (POC only - use keyless in prod)"
+    cmds:
+      - cosign generate-key-pair
+      - echo "✅ Keypair generated → cosign.key / cosign.pub"
+    status:
+      - test -f cosign.key
+      - test -f cosign.pub
+
+  sbom:attest:
+    desc: "Attest image SBOM to image digest (strongest — requires registry)"
+    deps: [signing:init]
+    cmds:
+      - ./scripts/sbom-attest.sh {{.IMAGE}} {{.SBOM_DIR}}/image/sbom-image-syft.json {{.COSIGN_KEY}}
+
+  sbom:sign:blob:
+    desc: "Sign SBOM as standalone blob (fallback — no registry needed)"
+    deps: [signing:init]
+    cmds:
+      - |
+        for sbom in {{.SBOM_DIR}}/image/sbom-image-syft.json {{.SBOM_DIR}}/source/sbom-source-cdxgen.json; do
+          if [ -f "$sbom" ]; then
+            cosign sign-blob \
+              --key {{.COSIGN_KEY}} \
+              --output-signature "${sbom}.sig" \
+              "$sbom" --yes 2>/dev/null
+            echo "✅ Signed → ${sbom}.sig"
+          fi
+        done
+
+  sbom:sign:
+    desc: "Sign SBOM (auto: attest if registry reachable, blob otherwise)"
+    deps: [signing:init]
+    cmds:
+      - ./scripts/sbom-sign.sh {{.IMAGE}} {{.SBOM_DIR}}/image/sbom-image-syft.json {{.COSIGN_KEY}}
+
+  # ==========================================================================
+  # SBOM VERIFICATION
+  # ==========================================================================
+
+  sbom:verify:
+    desc: "Verify SBOM signature and integrity"
+    cmds:
+      - ./scripts/sbom-verify.sh {{.IMAGE}} {{.SBOM_DIR}}/image/sbom-image-syft.json {{.COSIGN_PUB}}
+
+  sbom:verify:blob:
+    desc: "Verify standalone SBOM blob signature"
+    cmds:
+      - |
+        cosign verify-blob \
+          --key {{.COSIGN_PUB}} \
+          --signature {{.SBOM_DIR}}/image/sbom-image-syft.json.sig \
+          {{.SBOM_DIR}}/image/sbom-image-syft.json
+      - echo "✅ SBOM signature valid"
+
+  sbom:tamper:test:
+    desc: "Simulate SBOM tampering (demo integrity check)"
+    cmds:
+      - ./scripts/sbom-tamper-test.sh {{.SBOM_DIR}}/image/sbom-image-syft.json {{.COSIGN_PUB}}
+
+  # ==========================================================================
+  # VULNERABILITY SCANNING
+  # ==========================================================================
+
+  sbom:scan:
+    desc: "Scan image SBOM for vulnerabilities (Grype)"
+    cmds:
+      - mkdir -p {{.SCAN_DIR}}
+      - |
+        grype sbom:{{.SBOM_DIR}}/image/sbom-image-syft.json \
+          -o table \
+          -o json --file {{.SCAN_DIR}}/scan-grype.json
+      - echo "✅ Grype scan complete → {{.SCAN_DIR}}/scan-grype.json"
+
+  sbom:scan:trivy:
+    desc: "Scan image SBOM for vulnerabilities (Trivy)"
+    cmds:
+      - mkdir -p {{.SCAN_DIR}}
+      - |
+        trivy sbom {{.SBOM_DIR}}/image/sbom-image-syft.json \
+          --severity HIGH,CRITICAL \
+          --format json \
+          --output {{.SCAN_DIR}}/scan-trivy.json
+      - trivy sbom {{.SBOM_DIR}}/image/sbom-image-syft.json --severity HIGH,CRITICAL
+      - echo "✅ Trivy scan complete → {{.SCAN_DIR}}/scan-trivy.json"
+
+  sbom:scan:source:
+    desc: "Scan source SBOM for vulnerabilities (Grype)"
+    cmds:
+      - mkdir -p {{.SCAN_DIR}}
+      - |
+        SBOM_SOURCE=$(ls {{.SBOM_DIR}}/source/sbom-source-*.json 2>/dev/null | head -1)
+        if [ -n "$SBOM_SOURCE" ]; then
+          grype sbom:"$SBOM_SOURCE" \
+            -o table \
+            -o json --file {{.SCAN_DIR}}/scan-source-grype.json
+          echo "✅ Source scan → {{.SCAN_DIR}}/scan-source-grype.json"
+        else
+          echo "⚠️  No source SBOM found — run task sbom:generate:source first"
+        fi
+
+  sbom:scan:all:
+    desc: "Scan with ALL scanners (source + image)"
+    cmds:
+      - task: sbom:scan
+      - task: sbom:scan:trivy
+      - task: sbom:scan:source
+      - echo "✅ All scans complete (source + image)"
+
+  # ==========================================================================
+  # POLICY ENFORCEMENT (OPA)
+  # ==========================================================================
+
+  sbom:policy:
+    desc: "Evaluate SBOM against OPA policies"
+    cmds:
+      - ./scripts/sbom-policy.sh {{.SBOM_DIR}}/image/sbom-image-syft.json ./policies
+
+  # ==========================================================================
+  # DEPENDENCY-TRACK
+  # ==========================================================================
+
+  dtrack:up:
+    desc: "Start Dependency-Track (docker compose)"
+    cmds:
+      - docker compose -f docker-compose.dtrack.yml up -d
+      - echo "✅ Dependency-Track starting → http://localhost:8081"
+      - echo "   Default credentials: admin / admin"
+      - echo "   ⏳ First startup takes 2-3 minutes..."
+
+  dtrack:down:
+    desc: "Stop Dependency-Track"
+    cmds:
+      - docker compose -f docker-compose.dtrack.yml down
+
+  sbom:upload:
+    desc: "Upload SBOM to Dependency-Track"
+    cmds:
+      - ./scripts/sbom-upload-dtrack.sh {{.SBOM_DIR}}/image/sbom-image-syft.json {{.DTRACK_URL}} {{.DTRACK_API_KEY}} {{.DTRACK_PROJECT}}
+
+  # ==========================================================================
+  # SBOM STORAGE (OCI Registry)
+  # ==========================================================================
+
+  sbom:store:
+    desc: "Store SBOM as OCI artifact in registry"
+    cmds:
+      - |
+        oras push {{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}-sbom \
+          --artifact-type application/vnd.cyclonedx+json \
+          {{.SBOM_DIR}}/image/sbom-image-syft.json:application/json
+      - echo "✅ SBOM stored → {{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}-sbom"
+
+  sbom:fetch:
+    desc: "Fetch SBOM from OCI registry"
+    cmds:
+      - mkdir -p {{.SBOM_DIR}}/fetched
+      - |
+        oras pull {{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}-sbom \
+          -o {{.SBOM_DIR}}/fetched/
+      - echo "✅ SBOM fetched → {{.SBOM_DIR}}/fetched/"
+
+  # ==========================================================================
+  # BENCHMARKING
+  # ==========================================================================
+
+  benchmark:
+    desc: "Run full comparative benchmark of SBOM tools"
+    cmds:
+      - ./scripts/benchmark.sh {{.IMAGE}} {{.BENCHMARK_DIR}}
+
+  # ==========================================================================
+  # FULL PIPELINES
+  # ==========================================================================
+
+  pipeline:
+    desc: "Full supply chain pipeline (generate → sign → scan → policy)"
+    cmds:
+      - echo "🚀 Starting full supply chain pipeline..."
+      - task: sbom:generate
+      - task: sbom:sign:blob
+      - task: sbom:scan
+      - task: sbom:scan:source
+      - task: sbom:policy
+      - task: sbom:diff
+      - echo ""
+      - echo "=================================================="
+      - echo "✅ Pipeline complete. Outputs in ./output/"
+      - echo "=================================================="
+
+  pipeline:full:
+    desc: "Full pipeline including build and all tools"
+    cmds:
+      - task: build
+      - task: sbom:generate:all
+      - task: sbom:sign:blob
+      - task: sbom:scan:all
+      - task: sbom:policy
+      - task: sbom:diff
+      - task: benchmark
+
+  # ==========================================================================
+  # CLEANUP
+  # ==========================================================================
+
+  clean:
+    desc: "Remove all generated files"
+    cmds:
+      - rm -rf ./output
+      - echo "✅ Cleaned output directory"
+
+  clean:all:
+    desc: "Remove everything (output + keys)"
+    cmds:
+      - rm -rf ./output cosign.key cosign.pub
+      - echo "✅ Full cleanup done"

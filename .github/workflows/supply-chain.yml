@@ -1,0 +1,103 @@
+# =============================================================================
+# GitHub Actions - Supply Chain Security Pipeline
+# =============================================================================
+# Calls Taskfile targets — zero logic in YAML
+# =============================================================================
+
+name: Supply Chain Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Daily vulnerability rescan at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: supply-chain-poc
+  IMAGE_TAG: ${{ github.sha }}
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write      # Required for keyless signing (OIDC)
+  security-events: write
+
+jobs:
+
+  build-and-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+
+      - name: Install SBOM tools
+        run: sudo task install
+
+      - name: Build image
+        run: task build IMAGE_TAG=${{ env.IMAGE_TAG }}
+
+      - name: Generate SBOMs (source + image, all tools)
+        run: task sbom:generate:all IMAGE_TAG=${{ env.IMAGE_TAG }}
+
+      - name: Diff source vs image
+        run: task sbom:diff
+
+      - name: Sign SBOM
+        run: task sbom:sign IMAGE_TAG=${{ env.IMAGE_TAG }}
+
+      - name: Scan vulnerabilities (source + image)
+        run: task sbom:scan:all
+
+      - name: Policy check
+        run: task sbom:policy
+
+      - name: Run benchmark
+        run: task benchmark IMAGE_TAG=${{ env.IMAGE_TAG }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-outputs
+          path: |
+            output/
+          retention-days: 30
+
+  # Daily rescan (runs on schedule)
+  daily-rescan:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
+      - name: Install scan tools
+        run: |
+          sudo task install:grype
+          sudo task install:trivy
+
+      - name: Download latest SBOM
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom-outputs
+          path: output/
+        continue-on-error: true
+
+      - name: Rescan for new vulnerabilities
+        if: hashFiles('output/sbom/sbom-syft.json') != ''
+        run: task sbom:scan:all

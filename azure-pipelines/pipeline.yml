@@ -1,0 +1,140 @@
+# =============================================================================
+# Azure DevOps - Supply Chain Security Pipeline
+# =============================================================================
+# Calls the SAME Taskfile targets as GitHub Actions
+# Minimal adaptation: variable syntax + Task installation
+# =============================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+schedules:
+  # Daily vulnerability rescan at 2 AM UTC
+  - cron: '0 2 * * *'
+    displayName: 'Daily SBOM Rescan'
+    branches:
+      include:
+        - main
+    always: true
+
+variables:
+  IMAGE_NAME: 'supply-chain-poc'
+  IMAGE_TAG: '$(Build.SourceVersion)'
+  REGISTRY: '$(ACR_NAME).azurecr.io'   # Set ACR_NAME in Variable Group
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+
+  # ===========================================================================
+  # Build + SBOM Pipeline
+  # ===========================================================================
+  - stage: BuildAndScan
+    displayName: 'Build, SBOM & Scan'
+    condition: ne(variables['Build.Reason'], 'Schedule')
+
+    jobs:
+      - job: SupplyChain
+        displayName: 'Supply Chain Pipeline'
+        timeoutInMinutes: 30
+
+        steps:
+          - checkout: self
+
+          # Install go-task
+          - script: |
+              sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+            displayName: 'Install Task'
+
+          # Install SBOM toolchain
+          - script: sudo task install
+            displayName: 'Install SBOM Tools'
+
+          # Build
+          - script: task build IMAGE_TAG=$(IMAGE_TAG)
+            displayName: 'Build Image'
+
+          # Generate SBOMs
+          - script: task sbom:generate:all IMAGE_TAG=$(IMAGE_TAG)
+            displayName: 'Generate SBOMs (source + image, all tools)'
+
+          # Diff
+          - script: task sbom:diff
+            displayName: 'Diff Source vs Image SBOM'
+
+          # Sign
+          - script: task sbom:sign IMAGE_TAG=$(IMAGE_TAG)
+            displayName: 'Sign/Attest SBOM'
+
+          # Scan
+          - script: task sbom:scan:all
+            displayName: 'Vulnerability Scan (source + image)'
+
+          # Policy
+          - script: task sbom:policy
+            displayName: 'OPA Policy Check'
+
+          # Benchmark
+          - script: task benchmark IMAGE_TAG=$(IMAGE_TAG)
+            displayName: 'Tool Benchmark'
+
+          # Publish outputs
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish SBOM Outputs'
+            condition: always()
+            inputs:
+              PathtoPublish: 'output'
+              ArtifactName: 'sbom-outputs'
+
+  # ===========================================================================
+  # Daily Rescan (scheduled)
+  # ===========================================================================
+  - stage: DailyRescan
+    displayName: 'Daily Vulnerability Rescan'
+    condition: eq(variables['Build.Reason'], 'Schedule')
+
+    jobs:
+      - job: Rescan
+        displayName: 'Rescan SBOMs'
+
+        steps:
+          - checkout: self
+
+          - script: |
+              sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+            displayName: 'Install Task'
+
+          - script: |
+              sudo task install:grype
+              sudo task install:trivy
+            displayName: 'Install Scan Tools'
+
+          # Download last SBOM from previous pipeline run
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download Previous SBOM'
+            inputs:
+              buildType: 'specific'
+              project: '$(System.TeamProject)'
+              pipeline: '$(System.DefinitionId)'
+              buildVersionToDownload: 'latest'
+              downloadType: 'single'
+              artifactName: 'sbom-outputs'
+              downloadPath: '$(System.DefaultWorkingDirectory)'
+            continueOnError: true
+
+          - script: |
+              if [ -f "sbom-outputs/sbom/sbom-syft.json" ]; then
+                cp -r sbom-outputs/* output/ 2>/dev/null || true
+                task sbom:scan:all
+              else
+                echo "No previous SBOM found, skipping rescan"
+              fi
+            displayName: 'Rescan for New Vulns'
