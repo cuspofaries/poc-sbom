@@ -335,7 +335,7 @@ tasks:
   signing:init:
     desc: "Generate Cosign keypair (POC only - use keyless in prod)"
     cmds:
-      - cosign generate-key-pair
+      - COSIGN_PASSWORD="" cosign generate-key-pair
       - echo "✅ Keypair generated → cosign.key / cosign.pub"
     status:
       - test -f cosign.key

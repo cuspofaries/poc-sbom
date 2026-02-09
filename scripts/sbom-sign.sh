@@ -84,10 +84,10 @@ echo "── Attestation unavailable, falling back to blob signing ──"
 echo "   (image not pushed to registry, or registry unreachable)"
 
 if [ -f "$COSIGN_KEY" ]; then
-    cosign sign-blob \
+    COSIGN_PASSWORD="" cosign sign-blob \
         --key "$COSIGN_KEY" \
         --output-signature "${SBOM_FILE}.sig" \
-        "$SBOM_FILE" --yes 2>/dev/null
+        "$SBOM_FILE" --yes
     echo ""
     echo "✅ SBOM signed as blob → ${SBOM_FILE}.sig"
     echo "   ℹ️  For stronger guarantees, push image to registry and use: task sbom:attest"
