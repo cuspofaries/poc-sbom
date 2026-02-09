@@ -35,10 +35,11 @@ blocked_packages := {
 
 # ----- DENY rules (blocking — fail the pipeline) -----
 
-# Deny components without version
+# Deny components without version (except system files)
 deny contains msg if {
 	some component in input.components
 	not component.version
+	component.type != "file"  # Exclude system files which don't have versions
 	msg := sprintf("Component '%s' (type: %s) has no version specified", [component.name, component.type])
 }
 
