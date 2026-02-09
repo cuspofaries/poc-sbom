@@ -68,8 +68,10 @@ IMAGE_COMPONENTS=$(jq -r '.components[]? | "\(.name)@\(.version // "unknown")"' 
 SOURCE_NAMES=$(jq -r '.components[]?.name' "$SOURCE_SBOM" | sort -u)
 IMAGE_NAMES=$(jq -r '.components[]?.name' "$IMAGE_SBOM" | sort -u)
 
-SOURCE_COUNT=$(echo "$SOURCE_NAMES" | grep -c . || echo "0")
-IMAGE_COUNT=$(echo "$IMAGE_NAMES" | grep -c . || echo "0")
+SOURCE_COUNT=$(echo "$SOURCE_NAMES" | wc -l | tr -d ' ')
+[ -z "$SOURCE_NAMES" ] && SOURCE_COUNT=0
+IMAGE_COUNT=$(echo "$IMAGE_NAMES" | wc -l | tr -d ' ')
+[ -z "$IMAGE_NAMES" ] && IMAGE_COUNT=0
 
 # --- Counts ---
 echo "── Component Counts ──"
@@ -79,15 +81,17 @@ echo ""
 
 # --- Only in source (not in image) ---
 ONLY_SOURCE=$(comm -23 <(echo "$SOURCE_NAMES") <(echo "$IMAGE_NAMES"))
-ONLY_SOURCE_COUNT=$(echo "$ONLY_SOURCE" | grep -c . || echo "0")
+ONLY_SOURCE_COUNT=$(echo "$ONLY_SOURCE" | wc -l | tr -d ' ')
+[ -z "$ONLY_SOURCE" ] && ONLY_SOURCE_COUNT=0
 
 echo "── Only in SOURCE (declared but not shipped) ── [${ONLY_SOURCE_COUNT}]"
 if [ "$ONLY_SOURCE_COUNT" -gt 0 ]; then
     echo "   These are typically build-only or test dependencies:"
     echo "$ONLY_SOURCE" | head -20 | while read -r name; do
+        [ -z "$name" ] && continue
         VERSION=$(echo "$SOURCE_COMPONENTS" | grep "^${name}@" | head -1 | cut -d'@' -f2)
         echo "   • ${name} (${VERSION})"
-    done
+    done || true
     [ "$ONLY_SOURCE_COUNT" -gt 20 ] && echo "   ... and $((ONLY_SOURCE_COUNT - 20)) more"
 else
     echo "   (none)"
@@ -96,16 +100,18 @@ echo ""
 
 # --- Only in image (not in source) ---
 ONLY_IMAGE=$(comm -13 <(echo "$SOURCE_NAMES") <(echo "$IMAGE_NAMES"))
-ONLY_IMAGE_COUNT=$(echo "$ONLY_IMAGE" | grep -c . || echo "0")
+ONLY_IMAGE_COUNT=$(echo "$ONLY_IMAGE" | wc -l | tr -d ' ')
+[ -z "$ONLY_IMAGE" ] && ONLY_IMAGE_COUNT=0
 
 echo "── Only in IMAGE (shipped but not declared) ── [${ONLY_IMAGE_COUNT}]"
 if [ "$ONLY_IMAGE_COUNT" -gt 0 ]; then
     echo "   These are typically OS packages, transitive deps, or runtime libs:"
     echo "$ONLY_IMAGE" | head -30 | while read -r name; do
+        [ -z "$name" ] && continue
         VERSION=$(echo "$IMAGE_COMPONENTS" | grep "^${name}@" | head -1 | cut -d'@' -f2)
         TYPE=$(jq -r --arg n "$name" '.components[] | select(.name == $n) | .type // "unknown"' "$IMAGE_SBOM" 2>/dev/null | head -1)
         echo "   • ${name} (${VERSION}) [${TYPE}]"
-    done
+    done || true
     [ "$ONLY_IMAGE_COUNT" -gt 30 ] && echo "   ... and $((ONLY_IMAGE_COUNT - 30)) more"
 else
     echo "   (none)"
@@ -114,7 +120,8 @@ echo ""
 
 # --- Common (in both) ---
 COMMON=$(comm -12 <(echo "$SOURCE_NAMES") <(echo "$IMAGE_NAMES"))
-COMMON_COUNT=$(echo "$COMMON" | grep -c . || echo "0")
+COMMON_COUNT=$(echo "$COMMON" | wc -l | tr -d ' ')
+[ -z "$COMMON" ] && COMMON_COUNT=0
 
 echo "── Common (declared AND shipped) ── [${COMMON_COUNT}]"
 
