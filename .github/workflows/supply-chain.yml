@@ -53,7 +53,6 @@ jobs:
         run: |
           curl -sf -X PUT \
             -H "X-Api-Key: ${{ secrets.DTRACK_API_KEY }}" \
-            -H "Content-Type: multipart/form-data" \
             -F "autoCreate=true" \
             -F "projectName=${{ env.IMAGE_NAME }}" \
             -F "projectVersion=${{ env.IMAGE_TAG }}" \
