@@ -49,6 +49,17 @@ jobs:
       - name: Generate SBOMs (source + image, all tools)
         run: task sbom:generate:all IMAGE_TAG=${{ env.IMAGE_TAG }}
 
+      - name: Push SBOM to Dependency-Track
+        run: |
+          curl -sf -X PUT \
+            -H "X-Api-Key: ${{ secrets.DTRACK_API_KEY }}" \
+            -H "Content-Type: multipart/form-data" \
+            -F "autoCreate=true" \
+            -F "projectName=${{ env.IMAGE_NAME }}" \
+            -F "projectVersion=${{ env.IMAGE_TAG }}" \
+            -F "bom=@output/sbom/sbom-syft.json" \
+            https://dep-api.anthonymacle.com/api/v1/bom
+
       - name: Sign SBOM
         run: task sbom:sign IMAGE_TAG=${{ env.IMAGE_TAG }}
 
