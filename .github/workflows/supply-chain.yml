@@ -51,11 +51,16 @@ jobs:
 
       - name: Push SBOM to Dependency-Track
         run: |
-          BOM_BASE64=$(base64 -w0 output/sbom/image/sbom-image-syft.json)
+          jq -n \
+            --arg bom "$(base64 -w0 output/sbom/image/sbom-image-syft.json)" \
+            --arg name "${{ env.IMAGE_NAME }}" \
+            --arg version "${{ env.IMAGE_TAG }}" \
+            '{autoCreate: true, projectName: $name, projectVersion: $version, bom: $bom}' \
+            > /tmp/dtrack-payload.json
           curl -sS --fail -X PUT \
             -H "X-Api-Key: ${{ secrets.DTRACK_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d "{\"autoCreate\":true,\"projectName\":\"${{ env.IMAGE_NAME }}\",\"projectVersion\":\"${{ env.IMAGE_TAG }}\",\"bom\":\"${BOM_BASE64}\"}" \
+            -d @/tmp/dtrack-payload.json \
             https://dep-api.anthonymacle.com/api/v1/bom
 
       - name: Sign SBOM
