@@ -49,9 +49,6 @@ jobs:
       - name: Generate SBOMs (source + image, all tools)
         run: task sbom:generate:all IMAGE_TAG=${{ env.IMAGE_TAG }}
 
-      - name: Diff source vs image
-        run: task sbom:diff
-
       - name: Sign SBOM
         run: task sbom:sign IMAGE_TAG=${{ env.IMAGE_TAG }}
 

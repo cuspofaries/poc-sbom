@@ -9,7 +9,6 @@ version: '3'
 #   task sbom:generate:source  → Generate source SBOM (declared deps)
 #   task sbom:generate:image   → Generate image SBOM (shipped content)
 #   task sbom:generate         → Generate both source + image SBOMs
-#   task sbom:diff             → Compare source vs image SBOMs
 #   task sbom:attest           → Attest SBOM to image digest (requires registry)
 #   task sbom:sign:blob        → Sign SBOM as standalone file (no registry)
 #   task sbom:verify           → Verify SBOM integrity & signature
@@ -316,15 +315,6 @@ tasks:
       - echo "✅ All SBOMs generated (source + image, all tools)"
 
   # ==========================================================================
-  # SBOM DIFF — Source vs Image
-  # ==========================================================================
-
-  sbom:diff:
-    desc: "Compare source SBOM vs image SBOM (what's declared vs what's shipped)"
-    cmds:
-      - ./scripts/sbom-diff-source-image.sh {{.SBOM_DIR}}
-
-  # ==========================================================================
   # SBOM SIGNING & ATTESTATION
   # ==========================================================================
   # Priority order:
@@ -516,7 +506,6 @@ tasks:
       - task: sbom:scan
       - task: sbom:scan:source
       - task: sbom:policy
-      - task: sbom:diff
       - echo ""
       - echo "=================================================="
       - echo "✅ Pipeline complete. Outputs in ./output/"
@@ -530,7 +519,6 @@ tasks:
       - task: sbom:sign:blob
       - task: sbom:scan:all
       - task: sbom:policy
-      - task: sbom:diff
       - task: benchmark
 
   # ==========================================================================

@@ -303,64 +303,7 @@ Cette étape génère **6 SBOM différents** pour comparer les outils :
 
 ---
 
-#### 5. **Diff Source vs. Image** (~5 secondes)
-
-```bash
-task sbom:diff
-```
-
-**Ce qu'il fait** : Compare le SBOM source (ce que vous avez déclaré dans `requirements.txt`) vs. le SBOM image (ce qui est réellement livré dans le conteneur).
-
-**Exemple de Sortie** :
-
-```
-🔍 Diff Source vs Image SBOM
-═══════════════════════════════════════════════════════════
-
-   SBOM Source: sbom-source-cdxgen.json
-   SBOM Image:  sbom-image-syft.json
-
-── Nombre de Composants ──
-   Source (déclarés): 22
-   Image (livrés):    2919
-
-── Seulement dans SOURCE (déclarés mais non livrés) ── [0]
-   (aucun)
-
-── Seulement dans IMAGE (livrés mais non déclarés) ── [2897]
-   Ce sont typiquement des paquets OS, deps transitives ou libs runtime :
-   • bash (5.2.15-2+b2) [operating-system]
-   • openssl (3.0.11-1~deb12u2) [library]
-   • libc6 (2.36-9+deb12u8) [operating-system]
-   • libssl3 (3.0.11-1~deb12u2) [library]
-   ... et 2 893 de plus
-
-── Commun (dans les deux) ── [22]
-   Ce sont vos dépendances directes :
-   • flask (3.0.0)
-   • requests (2.31.0)
-   • pyyaml (6.0.1)
-   ... et 19 de plus
-
-💡 Astuce: L'image a significativement plus de composants que la source.
-     C'est normal pour les images conteneur (paquets OS, libs système).
-     Concentrez l'analyse des vulnérabilités sur le SBOM IMAGE pour une couverture complète.
-```
-
-**Pourquoi C'est Important** :
-
-1. **Détection de Dérive de la Chaîne d'Approvisionnement** : Si un composant apparaît dans l'image mais pas dans la source, c'est peut-être :
-   - Un paquet OS légitime (attendu)
-   - Une dépendance transitive (à investiguer)
-   - Une backdoor injectée (problème de sécurité critique)
-
-2. **Triage des Vulnérabilités** : Le SBOM source a 22 composants. Le SBOM image a 2 919 composants. Scanner le SBOM source est rapide mais incomplet. **Scannez toujours le SBOM image pour les déploiements production.**
-
-3. **Rapport de Conformité** : Les clients demandent souvent "Quelles licences open source sont dans votre produit ?" Le SBOM image est la source de vérité.
-
----
-
-#### 6. **Signature du SBOM** (~10 secondes)
+#### 5. **Signature du SBOM** (~10 secondes)
 
 ```bash
 task sbom:sign IMAGE_TAG=${{ github.sha }}
@@ -1223,13 +1166,7 @@ task sbom:generate:all
    ✅ BuildKit → output/sbom/image/buildkit/ (format SPDX)
 ```
 
-**3. Diff source vs. image** :
-
-```bash
-task sbom:diff
-```
-
-**4. Signer le SBOM** :
+**3. Signer le SBOM** :
 
 ```bash
 task sbom:sign
@@ -1300,7 +1237,7 @@ task pipeline
 task pipeline:full
 ```
 
-Cela exécute : `build` → `sbom:generate:all` → `sbom:diff` → `sbom:sign` → `sbom:scan:all` → `sbom:policy` → `benchmark`
+Cela exécute : `build` → `sbom:generate:all` → `sbom:sign` → `sbom:scan:all` → `sbom:policy` → `benchmark`
 
 ---
 
@@ -1380,12 +1317,11 @@ env:
 3. **Install SBOM tools** : Exécute `sudo task install` (Syft, Grype, Trivy, etc.)
 4. **Build image** : `task build IMAGE_TAG=9b6f9af`
 5. **Generate SBOMs** : `task sbom:generate:all IMAGE_TAG=9b6f9af`
-6. **Diff source vs image** : `task sbom:diff`
-7. **Sign SBOM** : `task sbom:sign IMAGE_TAG=9b6f9af`
-8. **Scan vulnerabilities** : `task sbom:scan:all`
-9. **Policy check** : `task sbom:policy`
-10. **Run benchmark** : `task benchmark IMAGE_TAG=9b6f9af`
-11. **Upload artifacts** : Sauvegarde `output/` vers les artefacts GitHub Actions
+6. **Sign SBOM** : `task sbom:sign IMAGE_TAG=9b6f9af`
+7. **Scan vulnerabilities** : `task sbom:scan:all`
+8. **Policy check** : `task sbom:policy`
+9. **Run benchmark** : `task benchmark IMAGE_TAG=9b6f9af`
+10. **Upload artifacts** : Sauvegarde `output/` vers les artefacts GitHub Actions
 
 **Temps d'exécution total** : ~2,5 minutes
 
@@ -1467,8 +1403,6 @@ task sbom:generate:image:docker  # Docker BuildKit (format SPDX)
 # Générer TOUS les SBOM (source + image, tous les outils)
 task sbom:generate:all
 
-# Comparer source vs. image
-task sbom:diff
 ```
 
 ---

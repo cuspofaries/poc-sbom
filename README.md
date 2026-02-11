@@ -301,64 +301,7 @@ This step generates **6 different SBOMs** to compare tools:
 
 ---
 
-#### 5. **Diff Source vs. Image** (~5 seconds)
-
-```bash
-task sbom:diff
-```
-
-**What it does**: Compares the source SBOM (what you declared in `requirements.txt`) vs. the image SBOM (what actually shipped in the container).
-
-**Example Output**:
-
-```
-🔍 Source vs Image SBOM Diff
-═══════════════════════════════════════════════════════════
-
-   Source SBOM: sbom-source-cdxgen.json
-   Image SBOM:  sbom-image-syft.json
-
-── Component Counts ──
-   Source (declared): 22
-   Image (shipped):   2919
-
-── Only in SOURCE (declared but not shipped) ── [0]
-   (none)
-
-── Only in IMAGE (shipped but not declared) ── [2897]
-   These are typically OS packages, transitive deps, or runtime libs:
-   • bash (5.2.15-2+b2) [operating-system]
-   • openssl (3.0.11-1~deb12u2) [library]
-   • libc6 (2.36-9+deb12u8) [operating-system]
-   • libssl3 (3.0.11-1~deb12u2) [library]
-   ... and 2,893 more
-
-── Common (in both) ── [22]
-   These are your direct dependencies:
-   • flask (3.0.0)
-   • requests (2.31.0)
-   • pyyaml (6.0.1)
-   ... and 19 more
-
-💡 Tip: Image has significantly more components than source.
-     This is normal for container images (OS packages, system libs).
-     Focus vulnerability scanning on the IMAGE SBOM for full coverage.
-```
-
-**Why This Matters**:
-
-1. **Supply Chain Drift Detection**: If a component appears in the image but not in source, it might be:
-   - A legitimate OS package (expected)
-   - A transitive dependency (investigate)
-   - An injected backdoor (critical security issue)
-
-2. **Vulnerability Triage**: Source SBOM has 22 components. Image SBOM has 2,919. Scanning the source SBOM is fast but incomplete. **Always scan the image SBOM for production deployments.**
-
-3. **Compliance Reporting**: Customers often ask "What open source licenses are in your product?" The image SBOM is the source of truth.
-
----
-
-#### 6. **Sign SBOM** (~10 seconds)
+#### 5. **Sign SBOM** (~10 seconds)
 
 ```bash
 task sbom:sign IMAGE_TAG=${{ github.sha }}
@@ -1221,13 +1164,7 @@ task sbom:generate:all
    ✅ BuildKit → output/sbom/image/buildkit/ (SPDX format)
 ```
 
-**3. Diff source vs. image**:
-
-```bash
-task sbom:diff
-```
-
-**4. Sign the SBOM**:
+**3. Sign the SBOM**:
 
 ```bash
 task sbom:sign
@@ -1298,7 +1235,7 @@ task pipeline
 task pipeline:full
 ```
 
-This runs: `build` → `sbom:generate:all` → `sbom:diff` → `sbom:sign` → `sbom:scan:all` → `sbom:policy` → `benchmark`
+This runs: `build` → `sbom:generate:all` → `sbom:sign` → `sbom:scan:all` → `sbom:policy` → `benchmark`
 
 ---
 
@@ -1378,12 +1315,11 @@ env:
 3. **Install SBOM tools**: Runs `sudo task install` (Syft, Grype, Trivy, etc.)
 4. **Build image**: `task build IMAGE_TAG=9b6f9af`
 5. **Generate SBOMs**: `task sbom:generate:all IMAGE_TAG=9b6f9af`
-6. **Diff source vs image**: `task sbom:diff`
-7. **Sign SBOM**: `task sbom:sign IMAGE_TAG=9b6f9af`
-8. **Scan vulnerabilities**: `task sbom:scan:all`
-9. **Policy check**: `task sbom:policy`
-10. **Run benchmark**: `task benchmark IMAGE_TAG=9b6f9af`
-11. **Upload artifacts**: Saves `output/` to GitHub Actions artifacts
+6. **Sign SBOM**: `task sbom:sign IMAGE_TAG=9b6f9af`
+7. **Scan vulnerabilities**: `task sbom:scan:all`
+8. **Policy check**: `task sbom:policy`
+9. **Run benchmark**: `task benchmark IMAGE_TAG=9b6f9af`
+10. **Upload artifacts**: Saves `output/` to GitHub Actions artifacts
 
 **Total runtime**: ~2.5 minutes
 
@@ -1465,8 +1401,6 @@ task sbom:generate:image:docker  # Docker BuildKit (SPDX format)
 # Generate ALL SBOMs (source + image, all tools)
 task sbom:generate:all
 
-# Compare source vs. image
-task sbom:diff
 ```
 
 ---

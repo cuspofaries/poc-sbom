@@ -66,10 +66,6 @@ stages:
           - script: task sbom:generate:all IMAGE_TAG=$(IMAGE_TAG)
             displayName: 'Generate SBOMs (source + image, all tools)'
 
-          # Diff
-          - script: task sbom:diff
-            displayName: 'Diff Source vs Image SBOM'
-
           # Sign
           - script: task sbom:sign IMAGE_TAG=$(IMAGE_TAG)
             displayName: 'Sign/Attest SBOM'
