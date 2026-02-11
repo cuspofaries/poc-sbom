@@ -51,7 +51,7 @@ jobs:
 
       - name: Push SBOM to Dependency-Track
         run: |
-          curl -sf -X PUT \
+          curl -sS --fail \
             -H "X-Api-Key: ${{ secrets.DTRACK_API_KEY }}" \
             -F "autoCreate=true" \
             -F "projectName=${{ env.IMAGE_NAME }}" \
