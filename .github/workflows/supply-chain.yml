@@ -57,7 +57,7 @@ jobs:
             -F "autoCreate=true" \
             -F "projectName=${{ env.IMAGE_NAME }}" \
             -F "projectVersion=${{ env.IMAGE_TAG }}" \
-            -F "bom=@output/sbom/sbom-syft.json" \
+            -F "bom=@output/sbom/image/sbom-image-syft.json" \
             https://dep-api.anthonymacle.com/api/v1/bom
 
       - name: Sign SBOM
