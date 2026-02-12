@@ -1,15 +1,25 @@
 # =============================================================================
 # Reusable SBOM Pipeline
 # =============================================================================
-# Any repo can call this workflow to get full SBOM coverage on their image.
+# Verifies image signature, generates SBOM, attests it, scans, and enforces
+# policies. Expects the image to already be built and signed (by poc-build-sign).
 #
 # Usage (in caller's workflow):
 #
 #   jobs:
+#     build:
+#       uses: cuspofaries/poc-build-sign/.github/workflows/build-sign-reusable.yml@main
+#       with:
+#         context: ./app
+#         image-name: my-app
+#       secrets:
+#         REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#
 #     sbom:
+#       needs: build
 #       uses: cuspofaries/poc-sbom/.github/workflows/sbom-reusable.yml@main
 #       with:
-#         image: ghcr.io/cuspofaries/my-app:${{ github.sha }}
+#         image: ${{ needs.build.outputs.image }}
 #         image-name: my-app
 #       secrets:
 #         DTRACK_API_KEY: ${{ secrets.DTRACK_API_KEY }}
@@ -22,7 +32,7 @@ on:
   workflow_call:
     inputs:
       image:
-        description: "Full image reference to scan (e.g. ghcr.io/org/app:tag)"
+        description: "Full image reference (digest preferred, e.g. ghcr.io/org/app@sha256:...)"
         required: true
         type: string
       image-name:
@@ -34,6 +44,16 @@ on:
         required: false
         type: string
         default: ""
+      cosign-oidc-issuer:
+        description: "Expected OIDC issuer for signature verification"
+        required: false
+        type: string
+        default: "https://token.actions.githubusercontent.com"
+      cosign-identity-regexp:
+        description: "Regexp matching the expected signer identity"
+        required: false
+        type: string
+        default: "github.com/cuspofaries/"
     secrets:
       DTRACK_API_KEY:
         description: "Dependency-Track API key"
@@ -75,20 +95,24 @@ jobs:
         env:
           REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
 
+      - name: Verify image signature
+        run: |
+          echo "Verifying image signature: ${{ inputs.image }}"
+          cosign verify \
+            --certificate-oidc-issuer "${{ inputs.cosign-oidc-issuer }}" \
+            --certificate-identity-regexp "${{ inputs.cosign-identity-regexp }}" \
+            "${{ inputs.image }}"
+          echo "Image signature verified"
+
       - name: Pull image
         run: docker pull ${{ inputs.image }}
-
-      - name: Sign image (provenance)
-        run: |
-          task image:sign \
-            IMAGE=${{ inputs.image }}
 
       - name: Generate image SBOM
         run: |
           task sbom:generate:image \
             IMAGE=${{ inputs.image }}
 
-      - name: Sign/Attest SBOM to image
+      - name: Attest SBOM to image
         run: |
           task sbom:sign \
             IMAGE=${{ inputs.image }}
