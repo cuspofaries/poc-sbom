@@ -11,9 +11,10 @@ cosign.pub
 .DS_Store
 Thumbs.db
 
-# IDE
+# IDE / Tools
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 
