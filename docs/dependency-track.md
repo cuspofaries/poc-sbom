@@ -4,7 +4,7 @@ Dependency-Track provides continuous monitoring of vulnerabilities in your SBOMs
 
 ---
 
-## Prerequisites
+## 1. Prerequisites
 
 - A running Dependency-Track instance (self-hosted or managed)
 - An API key with the following permissions:
@@ -21,11 +21,11 @@ Dependency-Track provides continuous monitoring of vulnerabilities in your SBOMs
 
 ---
 
-## GitHub Actions
+## 2. GitHub Actions Configuration
 
 The pipeline uses the official [`DependencyTrack/gh-upload-sbom`](https://github.com/DependencyTrack/gh-upload-sbom) action.
 
-### 1. Add the secret
+### Add the secret
 
 Go to your GitHub repository **Settings > Secrets and variables > Actions** and create a secret:
 
@@ -33,7 +33,7 @@ Go to your GitHub repository **Settings > Secrets and variables > Actions** and 
 |------|-------|
 | `DTRACK_API_KEY` | Your Dependency-Track API key |
 
-### 2. Workflow step
+### Workflow step
 
 The step in `.github/workflows/supply-chain.yml`:
 
@@ -49,7 +49,9 @@ The step in `.github/workflows/supply-chain.yml`:
     autoCreate: true
 ```
 
-### 3. Action parameters
+---
+
+## 3. GitHub Action Parameters Reference
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
@@ -66,24 +68,23 @@ The step in `.github/workflows/supply-chain.yml`:
 
 ---
 
-## Local Usage (Taskfile)
+## 4. Local Configuration (Taskfile)
 
-### Start a local Dependency-Track instance
+The Taskfile exposes three variables for Dependency-Track, configurable via environment variables or CLI overrides:
 
-```bash
-task dtrack:up
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DTRACK_URL` | `http://localhost:8081` | Dependency-Track API URL |
+| `DTRACK_API_KEY` | _(empty)_ | API key for authentication |
+| `DTRACK_PROJECT` | `supply-chain-poc` | Project name |
 
-This starts two containers via `docker-compose.dtrack.yml`:
+### Available tasks
 
-| Service | Port | Description |
-|---------|------|-------------|
-| API Server | `8081` | REST API |
-| Frontend | `8082` | Web UI |
-
-Default credentials: **admin / admin** (change on first login).
-
-The first startup takes 2-3 minutes while the NVD database syncs.
+| Task | Description |
+|------|-------------|
+| `task dtrack:up` | Start a local Dependency-Track instance via Docker Compose |
+| `task dtrack:down` | Stop the local instance |
+| `task sbom:upload` | Upload the image SBOM to Dependency-Track |
 
 ### Upload SBOM manually
 
@@ -100,7 +101,41 @@ This runs `scripts/sbom-upload-dtrack.sh` which:
 3. Uploads via `PUT /api/v1/bom`
 4. Returns a processing token
 
-### Stop the instance
+To point at a remote instance:
+
+```bash
+task sbom:upload \
+  DTRACK_URL=https://dep-api.example.com \
+  DTRACK_API_KEY=odt_xxxxxxxxxxxx \
+  DTRACK_PROJECT=my-app
+```
+
+---
+
+## 5. Local Instance with Docker Compose
+
+The file `docker-compose.dtrack.yml` provides a ready-to-use local stack.
+
+### Start
+
+```bash
+task dtrack:up
+```
+
+### Architecture
+
+| Service | Image | Port | Description |
+|---------|-------|------|-------------|
+| `dtrack-apiserver` | `dependencytrack/apiserver:latest` | `8081` | REST API + vulnerability engine |
+| `dtrack-frontend` | `dependencytrack/frontend:latest` | `8082` | Web UI |
+
+- Default credentials: **admin / admin** (change on first login)
+- The API server is configured with **2 GB RAM** (`-Xmx2g`) to keep the POC lightweight (default requires 8 GB+)
+- Data is persisted in a Docker volume `dtrack-data`
+- The first startup takes **2-3 minutes** while the NVD database syncs
+- A health check ensures the frontend only starts after the API is ready
+
+### Stop
 
 ```bash
 task dtrack:down
@@ -108,7 +143,7 @@ task dtrack:down
 
 ---
 
-## Troubleshooting
+## 6. Troubleshooting
 
 | Error | Cause | Fix |
 |-------|-------|-----|
@@ -116,3 +151,4 @@ task dtrack:down
 | **HTTP 403** | Missing permissions | Ensure the team has BOM_UPLOAD and PROJECT_CREATION_UPLOAD |
 | **HTTP 415** | Wrong content type | Use the official GitHub Action or base64-encode the BOM in JSON body |
 | **Connection refused** | Server unreachable | Check the hostname and that the instance is running |
+| **Argument list too long** | BOM too large for inline curl `-d` | Write payload to a file and use `curl -d @file.json` |

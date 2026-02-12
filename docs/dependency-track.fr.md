@@ -4,7 +4,7 @@ Dependency-Track assure le monitoring continu des vulnerabilites dans vos SBOMs.
 
 ---
 
-## Prerequis
+## 1. Prerequis
 
 - Une instance Dependency-Track accessible (auto-hebergee ou managee)
 - Une cle API avec les permissions suivantes :
@@ -21,11 +21,11 @@ Dependency-Track assure le monitoring continu des vulnerabilites dans vos SBOMs.
 
 ---
 
-## GitHub Actions
+## 2. Configuration GitHub Actions
 
 Le pipeline utilise l'action officielle [`DependencyTrack/gh-upload-sbom`](https://github.com/DependencyTrack/gh-upload-sbom).
 
-### 1. Ajouter le secret
+### Ajouter le secret
 
 Aller dans les **Settings > Secrets and variables > Actions** du repo GitHub et creer un secret :
 
@@ -33,7 +33,7 @@ Aller dans les **Settings > Secrets and variables > Actions** du repo GitHub et 
 |-----|--------|
 | `DTRACK_API_KEY` | Votre cle API Dependency-Track |
 
-### 2. Etape du workflow
+### Etape du workflow
 
 L'etape dans `.github/workflows/supply-chain.yml` :
 
@@ -49,7 +49,9 @@ L'etape dans `.github/workflows/supply-chain.yml` :
     autoCreate: true
 ```
 
-### 3. Parametres de l'action
+---
+
+## 3. Reference des parametres de l'action GitHub
 
 | Parametre | Requis | Default | Description |
 |-----------|--------|---------|-------------|
@@ -66,24 +68,23 @@ L'etape dans `.github/workflows/supply-chain.yml` :
 
 ---
 
-## Utilisation locale (Taskfile)
+## 4. Configuration locale (Taskfile)
 
-### Demarrer une instance locale Dependency-Track
+Le Taskfile expose trois variables pour Dependency-Track, configurables via des variables d'environnement ou en surcharge CLI :
 
-```bash
-task dtrack:up
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DTRACK_URL` | `http://localhost:8081` | URL de l'API Dependency-Track |
+| `DTRACK_API_KEY` | _(vide)_ | Cle API pour l'authentification |
+| `DTRACK_PROJECT` | `supply-chain-poc` | Nom du projet |
 
-Cela demarre deux conteneurs via `docker-compose.dtrack.yml` :
+### Taches disponibles
 
-| Service | Port | Description |
-|---------|------|-------------|
-| API Server | `8081` | API REST |
-| Frontend | `8082` | Interface web |
-
-Identifiants par defaut : **admin / admin** (a changer a la premiere connexion).
-
-Le premier demarrage prend 2-3 minutes pendant la synchronisation de la base NVD.
+| Tache | Description |
+|-------|-------------|
+| `task dtrack:up` | Demarrer une instance locale Dependency-Track via Docker Compose |
+| `task dtrack:down` | Arreter l'instance locale |
+| `task sbom:upload` | Uploader le SBOM image vers Dependency-Track |
 
 ### Uploader un SBOM manuellement
 
@@ -100,7 +101,41 @@ Cela execute `scripts/sbom-upload-dtrack.sh` qui :
 3. Upload via `PUT /api/v1/bom`
 4. Retourne un token de traitement
 
-### Arreter l'instance
+Pour pointer vers une instance distante :
+
+```bash
+task sbom:upload \
+  DTRACK_URL=https://dep-api.example.com \
+  DTRACK_API_KEY=odt_xxxxxxxxxxxx \
+  DTRACK_PROJECT=mon-app
+```
+
+---
+
+## 5. Instance locale avec Docker Compose
+
+Le fichier `docker-compose.dtrack.yml` fournit un stack local pret a l'emploi.
+
+### Demarrer
+
+```bash
+task dtrack:up
+```
+
+### Architecture
+
+| Service | Image | Port | Description |
+|---------|-------|------|-------------|
+| `dtrack-apiserver` | `dependencytrack/apiserver:latest` | `8081` | API REST + moteur de vulnerabilites |
+| `dtrack-frontend` | `dependencytrack/frontend:latest` | `8082` | Interface web |
+
+- Identifiants par defaut : **admin / admin** (a changer a la premiere connexion)
+- Le serveur API est configure avec **2 Go de RAM** (`-Xmx2g`) pour garder le POC leger (par defaut il necessite 8 Go+)
+- Les donnees sont persistees dans un volume Docker `dtrack-data`
+- Le premier demarrage prend **2-3 minutes** pendant la synchronisation de la base NVD
+- Un health check garantit que le frontend ne demarre qu'apres que l'API est prete
+
+### Arreter
 
 ```bash
 task dtrack:down
@@ -108,7 +143,7 @@ task dtrack:down
 
 ---
 
-## Depannage
+## 6. Depannage
 
 | Erreur | Cause | Solution |
 |--------|-------|----------|
@@ -116,3 +151,4 @@ task dtrack:down
 | **HTTP 403** | Permissions manquantes | Verifier que l'equipe a BOM_UPLOAD et PROJECT_CREATION_UPLOAD |
 | **HTTP 415** | Mauvais content type | Utiliser l'action GitHub officielle ou encoder le BOM en base64 dans un body JSON |
 | **Connection refused** | Serveur inaccessible | Verifier le hostname et que l'instance est bien demarree |
+| **Argument list too long** | BOM trop volumineux pour curl `-d` en inline | Ecrire le payload dans un fichier et utiliser `curl -d @file.json` |
