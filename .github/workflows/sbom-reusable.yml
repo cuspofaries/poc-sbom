@@ -1,0 +1,100 @@
+# =============================================================================
+# Reusable SBOM Pipeline
+# =============================================================================
+# Any repo can call this workflow to get full SBOM coverage on their image.
+#
+# Usage (in caller's workflow):
+#
+#   jobs:
+#     sbom:
+#       uses: cuspofaries/poc-sbom/.github/workflows/sbom-reusable.yml@main
+#       with:
+#         image: ghcr.io/cuspofaries/my-app:${{ github.sha }}
+#         image-name: my-app
+#       secrets:
+#         DTRACK_API_KEY: ${{ secrets.DTRACK_API_KEY }}
+#         registry-token: ${{ secrets.GITHUB_TOKEN }}
+# =============================================================================
+
+name: SBOM Pipeline (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: "Full image reference to scan (e.g. ghcr.io/org/app:tag)"
+        required: true
+        type: string
+      image-name:
+        description: "Project name for Dependency-Track"
+        required: true
+        type: string
+    secrets:
+      DTRACK_API_KEY:
+        description: "Dependency-Track API key"
+        required: false
+      registry-token:
+        description: "Token to pull image from registry (e.g. GITHUB_TOKEN)"
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout SBOM toolchain
+        uses: actions/checkout@v4
+        with:
+          repository: cuspofaries/poc-sbom
+          ref: main
+
+      - name: Install Task
+        run: |
+          sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - name: Install SBOM tools
+        run: sudo task install
+
+      - name: Login to GHCR
+        if: ${{ secrets.registry-token != '' }}
+        run: echo "${{ secrets.registry-token }}" | docker login ghcr.io -u _ --password-stdin
+
+      - name: Pull image
+        run: docker pull ${{ inputs.image }}
+
+      - name: Generate image SBOM
+        run: |
+          task sbom:generate:image \
+            IMAGE=${{ inputs.image }}
+
+      - name: Sign SBOM
+        run: task sbom:sign:blob
+
+      - name: Scan vulnerabilities
+        run: task sbom:scan
+
+      - name: Policy check (OPA)
+        run: task sbom:policy
+
+      - name: Push SBOM to Dependency-Track
+        if: ${{ secrets.DTRACK_API_KEY != '' }}
+        uses: DependencyTrack/gh-upload-sbom@v3
+        with:
+          serverHostname: dep-api.anthonymacle.com
+          apiKey: ${{ secrets.DTRACK_API_KEY }}
+          projectName: ${{ inputs.image-name }}
+          projectVersion: ${{ github.sha }}
+          bomFilename: output/sbom/image/sbom-image-syft.json
+          autoCreate: true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-outputs
+          path: output/
+          retention-days: 30
