@@ -77,9 +77,6 @@ jobs:
           task sbom:generate:image \
             IMAGE=${{ inputs.image }}
 
-      - name: Sign SBOM
-        run: task sbom:sign:blob
-
       - name: Scan vulnerabilities
         run: task sbom:scan
 
