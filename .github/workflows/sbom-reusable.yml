@@ -13,7 +13,7 @@
 #         image-name: my-app
 #       secrets:
 #         DTRACK_API_KEY: ${{ secrets.DTRACK_API_KEY }}
-#         registry-token: ${{ secrets.GITHUB_TOKEN }}
+#         REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 # =============================================================================
 
 name: SBOM Pipeline (Reusable)
@@ -29,11 +29,16 @@ on:
         description: "Project name for Dependency-Track"
         required: true
         type: string
+      dtrack-hostname:
+        description: "Dependency-Track server hostname (skip upload if empty)"
+        required: false
+        type: string
+        default: ""
     secrets:
       DTRACK_API_KEY:
         description: "Dependency-Track API key"
         required: false
-      registry-token:
+      REGISTRY_TOKEN:
         description: "Token to pull image from registry (e.g. GITHUB_TOKEN)"
         required: false
 
@@ -60,8 +65,9 @@ jobs:
         run: sudo task install
 
       - name: Login to GHCR
-        if: ${{ secrets.registry-token != '' }}
-        run: echo "${{ secrets.registry-token }}" | docker login ghcr.io -u _ --password-stdin
+        run: echo "$REGISTRY_TOKEN" | docker login ghcr.io -u _ --password-stdin
+        env:
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
 
       - name: Pull image
         run: docker pull ${{ inputs.image }}
@@ -81,10 +87,10 @@ jobs:
         run: task sbom:policy
 
       - name: Push SBOM to Dependency-Track
-        if: ${{ secrets.DTRACK_API_KEY != '' }}
+        if: ${{ inputs.dtrack-hostname != '' }}
         uses: DependencyTrack/gh-upload-sbom@v3
         with:
-          serverHostname: dep-api.anthonymacle.com
+          serverHostname: ${{ inputs.dtrack-hostname }}
           apiKey: ${{ secrets.DTRACK_API_KEY }}
           projectName: ${{ inputs.image-name }}
           projectVersion: ${{ github.sha }}
