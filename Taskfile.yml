@@ -220,6 +220,19 @@ tasks:
       - echo "✅ All SBOMs generated (source + image)"
 
   # ==========================================================================
+  # IMAGE SIGNING
+  # ==========================================================================
+  # Signs the image itself — proves provenance ("this image comes from us").
+  # Should run BEFORE SBOM attestation.
+  # ==========================================================================
+
+  image:sign:
+    desc: "Sign container image with cosign (proves provenance)"
+    deps: [signing:init]
+    cmds:
+      - ./scripts/image-sign.sh {{.IMAGE}} {{.COSIGN_KEY}}
+
+  # ==========================================================================
   # SBOM SIGNING & ATTESTATION
   # ==========================================================================
   # Priority order:

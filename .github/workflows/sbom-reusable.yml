@@ -78,6 +78,11 @@ jobs:
       - name: Pull image
         run: docker pull ${{ inputs.image }}
 
+      - name: Sign image (provenance)
+        run: |
+          task image:sign \
+            IMAGE=${{ inputs.image }}
+
       - name: Generate image SBOM
         run: |
           task sbom:generate:image \
