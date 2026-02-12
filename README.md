@@ -537,6 +537,33 @@ Edit `policies/sbom-compliance.rego` to add:
 - **Automation**: No manual security reviews for every PR
 - **Consistency**: Same rules across all projects
 
+**Per-Repo Custom Policies (Baseline + Merge)**:
+
+Consumer repos can add project-specific OPA rules **on top of** the baseline policies. The reusable workflow automatically detects a `policies/` directory in the consumer repo and merges both sets of rules.
+
+How it works:
+1. **Baseline** (`poc-sbom/policies/`): Always applied, non-overridable
+2. **Custom** (`<consumer-repo>/policies/`): Optional, merged by OPA
+
+To add custom policies, create a `policies/` directory in your repo with `.rego` files using `package sbom`:
+
+```rego
+# my-app/policies/project-policies.rego
+package sbom
+
+import rego.v1
+
+project_blocked := {"moment", "request"}
+
+deny contains msg if {
+    some component in input.components
+    component.name in project_blocked
+    msg := sprintf("[project] '%s' is not allowed", [component.name])
+}
+```
+
+**Constraint**: Do not redefine baseline variables (`approved_licenses`, `blocked_packages`). OPA would raise a conflict error. Instead, create new rules with your own variables.
+
 ---
 
 #### 9. **Upload Artifacts** (~15 seconds)
@@ -916,7 +943,7 @@ opa eval --fail-defined --data policies/ --input sbom.json 'data.sbom.deny'
 
 **Custom Policies**:
 
-You can extend `policies/sbom-compliance.rego` to:
+You can extend the baseline by editing `policies/sbom-compliance.rego`, or — for consumer repos using the reusable workflow — add project-specific rules in your own `policies/` directory.
 
 **Block High/Critical CVEs**:
 ```rego
@@ -943,6 +970,61 @@ deny contains msg if {
   msg := "SBOM is not signed"
 }
 ```
+
+### Per-Repo Custom Policies
+
+The reusable workflow supports a **baseline + merge** model for OPA policies:
+
+```
+poc-sbom/policies/              ← Baseline (always applied, non-overridable)
+├── sbom-compliance.rego        ← approved_licenses, blocked_packages, deny/warn rules
+
+consumer-repo/policies/         ← Custom (optional, merged with baseline)
+├── project-policies.rego       ← Project-specific deny/warn rules
+```
+
+**How It Works**:
+
+1. The reusable workflow checks out both the SBOM toolchain repo and the consumer repo
+2. If `policies/` exists in the consumer repo, OPA loads both directories (`-d baseline/ -d custom/`)
+3. Rules from both directories are merged: all `deny` and `warn` sets are combined
+4. The baseline rules cannot be overridden — they are always enforced
+
+**Adding Custom Policies to Your Repo**:
+
+1. Create a `policies/` directory in your repository
+2. Add `.rego` files using `package sbom` and `import rego.v1`
+3. Add new `deny contains ...` or `warn contains ...` rules
+4. Push — the reusable workflow will automatically detect and merge them
+
+**Example** (`policies/project-policies.rego`):
+
+```rego
+package sbom
+
+import rego.v1
+
+# Block deprecated packages in this project
+project_blocked := {"moment", "request"}
+
+deny contains msg if {
+    some component in input.components
+    component.name in project_blocked
+    msg := sprintf("[project] Package '%s' is not allowed", [component.name])
+}
+
+# Warn on GPL-3.0 licenses
+warn contains msg if {
+    some component in input.components
+    some license_entry in component.licenses
+    license_entry.license.id == "GPL-3.0-only"
+    msg := sprintf("[project] GPL-3.0 found in '%s' — review required", [component.name])
+}
+```
+
+**Important**: Do **not** redefine variables from the baseline (`approved_licenses`, `blocked_packages`). OPA does not support variable redefinition within the same package — it will raise a conflict error. Instead, create your own variables (e.g., `project_blocked`).
+
+**Without custom policies**: If your repo has no `policies/` directory, only the baseline rules are applied. No changes needed — fully backwards compatible.
 
 ---
 

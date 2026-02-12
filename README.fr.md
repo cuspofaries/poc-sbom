@@ -543,6 +543,33 @@ warn contains msg if {
 - **Automatisation** : Pas de revues de sécurité manuelles pour chaque PR
 - **Cohérence** : Mêmes règles pour tous les projets
 
+**Politiques Custom par Repo (Socle + Fusion)** :
+
+Les repos consommateurs peuvent ajouter des règles OPA spécifiques au projet **en plus** des politiques de base. Le reusable workflow détecte automatiquement un dossier `policies/` dans le repo consommateur et fusionne les deux ensembles de règles.
+
+Fonctionnement :
+1. **Socle** (`poc-sbom/policies/`) : Toujours appliqué, non-overridable
+2. **Custom** (`<repo-consommateur>/policies/`) : Optionnel, fusionné par OPA
+
+Pour ajouter des politiques custom, créez un dossier `policies/` dans votre repo avec des fichiers `.rego` utilisant `package sbom` :
+
+```rego
+# mon-app/policies/project-policies.rego
+package sbom
+
+import rego.v1
+
+project_blocked := {"moment", "request"}
+
+deny contains msg if {
+    some component in input.components
+    component.name in project_blocked
+    msg := sprintf("[project] '%s' n'est pas autorisé", [component.name])
+}
+```
+
+**Contrainte** : Ne pas redéfinir les variables du socle (`approved_licenses`, `blocked_packages`). OPA lancerait une erreur de conflit. Créez plutôt de nouvelles règles avec vos propres variables.
+
 ---
 
 #### 9. **Téléversement des Artefacts** (~15 secondes)
@@ -922,7 +949,7 @@ opa eval --fail-defined --data policies/ --input sbom.json 'data.sbom.deny'
 
 **Politiques Personnalisées** :
 
-Vous pouvez étendre `policies/sbom-compliance.rego` pour :
+Vous pouvez étendre le socle en éditant `policies/sbom-compliance.rego`, ou — pour les repos consommateurs utilisant le reusable workflow — ajouter des règles spécifiques au projet dans votre propre dossier `policies/`.
 
 **Bloquer les CVE High/Critical** :
 ```rego
@@ -949,6 +976,61 @@ deny contains msg if {
   msg := "SBOM is not signed"
 }
 ```
+
+### Politiques Custom par Repo
+
+Le reusable workflow supporte un modèle **socle + fusion** pour les politiques OPA :
+
+```
+poc-sbom/policies/              ← Socle (toujours appliqué, non-overridable)
+├── sbom-compliance.rego        ← approved_licenses, blocked_packages, règles deny/warn
+
+repo-consommateur/policies/     ← Custom (optionnel, fusionné avec le socle)
+├── project-policies.rego       ← Règles deny/warn spécifiques au projet
+```
+
+**Fonctionnement** :
+
+1. Le reusable workflow checkout le repo du toolchain SBOM et le repo consommateur
+2. Si `policies/` existe dans le repo consommateur, OPA charge les deux répertoires (`-d socle/ -d custom/`)
+3. Les règles des deux répertoires sont fusionnées : tous les ensembles `deny` et `warn` sont combinés
+4. Les règles du socle ne peuvent pas être écrasées — elles sont toujours appliquées
+
+**Ajouter des Politiques Custom à Votre Repo** :
+
+1. Créer un dossier `policies/` dans votre repository
+2. Ajouter des fichiers `.rego` utilisant `package sbom` et `import rego.v1`
+3. Ajouter de nouvelles règles `deny contains ...` ou `warn contains ...`
+4. Push — le reusable workflow les détectera et les fusionnera automatiquement
+
+**Exemple** (`policies/project-policies.rego`) :
+
+```rego
+package sbom
+
+import rego.v1
+
+# Bloquer les paquets obsolètes dans ce projet
+project_blocked := {"moment", "request"}
+
+deny contains msg if {
+    some component in input.components
+    component.name in project_blocked
+    msg := sprintf("[project] Le paquet '%s' n'est pas autorisé", [component.name])
+}
+
+# Avertir sur les licences GPL-3.0
+warn contains msg if {
+    some component in input.components
+    some license_entry in component.licenses
+    license_entry.license.id == "GPL-3.0-only"
+    msg := sprintf("[project] GPL-3.0 trouvé dans '%s' — revue requise", [component.name])
+}
+```
+
+**Important** : Ne **pas** redéfinir les variables du socle (`approved_licenses`, `blocked_packages`). OPA ne supporte pas la redéfinition de variables dans le même package — il lèvera une erreur de conflit. Créez plutôt vos propres variables (ex : `project_blocked`).
+
+**Sans politiques custom** : Si votre repo n'a pas de dossier `policies/`, seules les règles du socle sont appliquées. Aucun changement nécessaire — entièrement rétrocompatible.
 
 ---
 
