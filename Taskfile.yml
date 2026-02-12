@@ -31,6 +31,9 @@ vars:
   SBOM_DIR: ./output/sbom
   SCAN_DIR: ./output/scans
 
+  # -- Policy --
+  EXTRA_POLICIES: '{{.EXTRA_POLICIES | default ""}}'
+
   # -- Dependency-Track --
   DTRACK_URL: '{{.DTRACK_URL | default "http://localhost:8081"}}'
   DTRACK_API_KEY: '{{.DTRACK_API_KEY | default ""}}'
@@ -328,9 +331,9 @@ tasks:
   # ==========================================================================
 
   sbom:policy:
-    desc: "Evaluate SBOM against OPA policies"
+    desc: "Evaluate SBOM against OPA policies (baseline + optional custom)"
     cmds:
-      - ./scripts/sbom-policy.sh {{.SBOM_DIR}}/image/sbom-image-trivy.json ./policies
+      - ./scripts/sbom-policy.sh {{.SBOM_DIR}}/image/sbom-image-trivy.json ./policies {{.EXTRA_POLICIES}}
 
   # ==========================================================================
   # DEPENDENCY-TRACK

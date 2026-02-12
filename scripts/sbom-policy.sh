@@ -2,16 +2,29 @@
 # =============================================================================
 # sbom-policy.sh - Evaluate SBOM against OPA compliance policies
 #
-# Usage: ./scripts/sbom-policy.sh <sbom-file> <policies-dir>
+# Usage: ./scripts/sbom-policy.sh <sbom-file> <policies-dir> [extra-policies-dir]
+#
+# The extra-policies-dir (optional) allows consumer repos to add their own
+# rules on top of the baseline policies. Both sets are merged by OPA.
 # =============================================================================
 set -euo pipefail
 
-SBOM_FILE="${1:?Usage: $0 <sbom-file> <policies-dir>}"
+SBOM_FILE="${1:?Usage: $0 <sbom-file> <policies-dir> [extra-policies-dir]}"
 POLICIES_DIR="${2:-./policies}"
+EXTRA_POLICIES_DIR="${3:-}"
+
+# Build OPA data flags (baseline + optional custom policies)
+OPA_DATA_FLAGS="-d ${POLICIES_DIR}/"
+if [ -n "$EXTRA_POLICIES_DIR" ] && [ -d "$EXTRA_POLICIES_DIR" ]; then
+    OPA_DATA_FLAGS="$OPA_DATA_FLAGS -d ${EXTRA_POLICIES_DIR}/"
+fi
 
 echo "📋 Evaluating SBOM against policies..."
 echo "   SBOM:     ${SBOM_FILE}"
-echo "   Policies: ${POLICIES_DIR}/"
+echo "   Baseline: ${POLICIES_DIR}/"
+if [ -n "$EXTRA_POLICIES_DIR" ] && [ -d "$EXTRA_POLICIES_DIR" ]; then
+    echo "   Custom:   ${EXTRA_POLICIES_DIR}/"
+fi
 echo ""
 
 if ! command -v opa &>/dev/null; then
@@ -22,7 +35,7 @@ fi
 # --- Evaluate deny rules ---
 echo "── Deny Rules (blocking) ──"
 DENY_RESULT=$(opa eval \
-    -d "${POLICIES_DIR}/" \
+    $OPA_DATA_FLAGS \
     -i "$SBOM_FILE" \
     'data.sbom.deny' \
     --format raw 2>/dev/null || echo "[]")
@@ -43,7 +56,7 @@ echo ""
 # --- Evaluate warn rules ---
 echo "── Warning Rules (advisory) ──"
 WARN_RESULT=$(opa eval \
-    -d "${POLICIES_DIR}/" \
+    $OPA_DATA_FLAGS \
     -i "$SBOM_FILE" \
     'data.sbom.warn' \
     --format raw 2>/dev/null || echo "[]")
@@ -64,7 +77,7 @@ echo ""
 # --- Evaluate info/stats ---
 echo "── SBOM Statistics ──"
 STATS=$(opa eval \
-    -d "${POLICIES_DIR}/" \
+    $OPA_DATA_FLAGS \
     -i "$SBOM_FILE" \
     'data.sbom.stats' \
     --format raw 2>/dev/null || echo "{}")

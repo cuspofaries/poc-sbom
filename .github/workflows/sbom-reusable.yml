@@ -57,6 +57,11 @@ jobs:
           repository: cuspofaries/poc-sbom
           ref: main
 
+      - name: Checkout consumer repo (for custom policies)
+        uses: actions/checkout@v4
+        with:
+          path: consumer-repo
+
       - name: Install Task
         run: |
           sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
@@ -81,7 +86,13 @@ jobs:
         run: task sbom:scan
 
       - name: Policy check (OPA)
-        run: task sbom:policy
+        run: |
+          if [ -d "consumer-repo/policies" ]; then
+            echo "Custom policies found in consumer repo"
+            task sbom:policy EXTRA_POLICIES=consumer-repo/policies
+          else
+            task sbom:policy
+          fi
 
       - name: Push SBOM to Dependency-Track
         if: ${{ inputs.dtrack-hostname != '' }}
