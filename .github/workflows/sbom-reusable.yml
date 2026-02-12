@@ -44,7 +44,8 @@ on:
 
 permissions:
   contents: read
-  packages: read
+  packages: write
+  id-token: write
 
 jobs:
   sbom:
@@ -80,6 +81,11 @@ jobs:
       - name: Generate image SBOM
         run: |
           task sbom:generate:image \
+            IMAGE=${{ inputs.image }}
+
+      - name: Sign/Attest SBOM to image
+        run: |
+          task sbom:sign \
             IMAGE=${{ inputs.image }}
 
       - name: Scan vulnerabilities
