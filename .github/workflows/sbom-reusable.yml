@@ -91,7 +91,7 @@ jobs:
           apiKey: ${{ secrets.DTRACK_API_KEY }}
           projectName: ${{ inputs.image-name }}
           projectVersion: ${{ github.sha }}
-          bomFilename: output/sbom/image/sbom-image-syft.json
+          bomFilename: output/sbom/image/sbom-image-trivy.json
           autoCreate: true
 
       - name: Upload artifacts

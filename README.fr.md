@@ -35,8 +35,7 @@ Ce projet montre comment :
 2. **Signer et attester cryptographiquement** les SBOM pour empêcher la falsification
 3. **Analyser les vulnérabilités** avec des outils standards de l'industrie
 4. **Appliquer des politiques** sous forme de code avec OPA (Open Policy Agent)
-5. **Comparer source vs. image** pour détecter la dérive de la chaîne d'approvisionnement
-6. **Tout automatiser** en CI/CD avec des principes zero-trust
+5. **Tout automatiser** en CI/CD avec des principes zero-trust
 
 **Ce n'est pas un tutoriel—c'est une implémentation de référence que vous pouvez forker et adapter pour une utilisation en production.**
 
@@ -50,7 +49,7 @@ Ce projet montre comment :
 │                                                                         │
 │  ┌──────────┐    ┌──────────────┐    ┌─────────┐    ┌──────────┐      │
 │  │  Code    │───▶│ Génération   │───▶│  Signer │───▶│  Scanner │──┐   │
-│  │  Source  │    │ SBOM (Source)│    │& Attester│    │ (Grype)  │  │   │
+│  │  Source  │    │ SBOM (Source)│    │& Attester│    │  (Trivy) │  │   │
 │  └──────────┘    └──────────────┘    └─────────┘    └──────────┘  │   │
 │                                                                     │   │
 │  ┌──────────┐    ┌──────────────┐    ┌─────────┐    ┌──────────┐  │   │
@@ -58,24 +57,18 @@ Ce projet montre comment :
 │  │Conteneur │    │ SBOM (Image) │    │& Attester│    │  (Trivy) │  │   │
 │  └──────────┘    └──────────────┘    └─────────┘    └──────────┘  │   │
 │                                                                     │   │
-│                     ┌─────────────────┐                            │   │
-│                     │  Diff Source vs │◀───────────────────────────┘   │
-│                     │      Image      │                                │
-│                     └────────┬────────┘                                │
-│                              │                                         │
-│                              ▼                                         │
-│                     ┌─────────────────┐                                │
-│                     │ Vérification    │                                │
-│                     │   Politiques    │                                │
-│                     │      (OPA)      │                                │
-│                     └────────┬────────┘                                │
-│                              │                                         │
-│                              ▼                                         │
-│                     ┌─────────────────┐                                │
-│                     │  Téléversement  │                                │
-│                     │   Résultats     │                                │
-│                     │  (Artefacts)    │                                │
-│                     └─────────────────┘                                │
+│                     ┌─────────────────┐                              │   │
+│                     │ Vérification    │◀─────────────────────────────┘   │
+│                     │   Politiques    │                                  │
+│                     │      (OPA)      │                                  │
+│                     └────────┬────────┘                                  │
+│                              │                                          │
+│                              ▼                                          │
+│                     ┌─────────────────┐                                  │
+│                     │  Téléversement  │                                  │
+│                     │   Résultats     │                                  │
+│                     │  (Artefacts)    │                                  │
+│                     └─────────────────┘                                  │
 └─────────────────────────────────────────────────────────────────────────┘
              │
              ▼
@@ -101,7 +94,7 @@ Ce projet montre comment :
 
 3. **Idempotent & Reproductible** : Chaque étape peut être exécutée localement ou en CI avec des résultats identiques. Pas de problème "ça marche sur ma machine".
 
-4. **Agnostique aux Outils** : Ce POC utilise Syft, Grype, Trivy, cdxgen et OPA, mais les scripts sont conçus pour être interchangeables. Chaque outil génère du CycloneDX 1.5 JSON—un format standard.
+4. **Agnostique aux Outils** : Ce POC utilise Trivy, cdxgen et OPA, mais les scripts sont conçus pour être interchangeables. Trivy gère à la fois la génération SBOM et l'analyse des vulnérabilités. Chaque outil génère du CycloneDX 1.5 JSON—un format standard.
 
 ---
 
@@ -132,42 +125,18 @@ sudo task install
 
 **Ce qu'il fait** : Installe tous les outils SBOM et de sécurité en parallèle :
 
-- **Syft** (v1.41.2) : Générateur SBOM pour conteneurs et systèmes de fichiers
-- **Grype** (v0.107.1) : Scanner de vulnérabilités
-- **Trivy** (v0.69.1) : Scanner de sécurité multi-usage
+- **Trivy** (v0.69.1) : Scanner de sécurité multi-usage (génération SBOM + analyse de vulnérabilités)
 - **cdxgen** : Générateur SBOM pour code source (supporte Python, Node.js, Java, Go, etc.)
 - **Cosign** : Outil de signature cryptographique (Sigstore)
 - **OPA** : Open Policy Agent pour l'évaluation de politiques
 - **ORAS** : OCI Registry as Storage (pour pousser les SBOM vers les registres)
 
-**Comment ça marche** : La tâche `install` dans `Taskfile.yml` exécute des sous-tâches (`install:syft`, `install:grype`, etc.) qui :
+**Comment ça marche** : La tâche `install` dans `Taskfile.yml` exécute des sous-tâches (`install:trivy`, `install:cdxgen`, etc.) qui :
 
 1. Téléchargent le dernier binaire depuis GitHub Releases
 2. Vérifient les checksums (quand supporté)
 3. Installent dans `/usr/local/bin` avec les permissions appropriées
 4. Utilisent une logique de retry (3 tentatives) pour gérer les erreurs réseau transitoires
-
-**Exemple de Retry** (depuis `Taskfile.yml:69-87`) :
-```yaml
-install:syft:
-  desc: "Install Syft (SBOM generator)"
-  cmds:
-    - |
-      for i in 1 2 3; do
-        echo "Attempt $i to install syft..."
-        if curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin; then
-          echo "✅ Syft installed successfully"
-          break
-        else
-          echo "⚠️  Attempt $i failed, retrying in 5 seconds..."
-          sleep 5
-        fi
-        if [ $i -eq 3 ]; then
-          echo "❌ Failed to install syft after 3 attempts"
-          exit 1
-        fi
-      done
-```
 
 **Pourquoi la logique de retry ?** : Le CDN de GitHub renvoie occasionnellement des erreurs HTTP 502. La logique de retry rend le pipeline plus résilient.
 
@@ -212,18 +181,16 @@ jinja2==3.1.2          # Intentionnellement plus ancien pour test vulnérabilit�
 task sbom:generate:all IMAGE_TAG=${{ github.sha }}
 ```
 
-Cette étape génère **6 SBOM différents** pour comparer les outils :
+Cette étape génère **4 SBOM différents** pour comparer les outils :
 
 | Fichier | Outil | Cible | Format |
 |---------|-------|-------|--------|
 | `output/sbom/source/sbom-source-cdxgen.json` | cdxgen | Code source | CycloneDX 1.5 |
 | `output/sbom/source/sbom-source-trivy.json` | Trivy | Système de fichiers | CycloneDX 1.5 |
-| `output/sbom/source/sbom-source-syft.json` | Syft | Répertoire | CycloneDX 1.5 |
-| `output/sbom/image/sbom-image-syft.json` | Syft | Conteneur | CycloneDX 1.5 |
 | `output/sbom/image/sbom-image-trivy.json` | Trivy | Conteneur | CycloneDX 1.5 |
 | `output/sbom/image/buildkit/` | Docker BuildKit | Build-time | SPDX 2.3 |
 
-**Exemple de Sortie** (sbom-image-syft.json, tronqué) :
+**Exemple de Sortie** (sbom-image-trivy.json, tronqué) :
 
 ```json
 {
@@ -234,9 +201,9 @@ Cette étape génère **6 SBOM différents** pour comparer les outils :
     "timestamp": "2026-02-09T23:14:32Z",
     "tools": [
       {
-        "vendor": "anchore",
-        "name": "syft",
-        "version": "1.41.2"
+        "vendor": "aquasecurity",
+        "name": "trivy",
+        "version": "0.69.1"
       }
     ],
     "component": {
@@ -287,19 +254,11 @@ Cette étape génère **6 SBOM différents** pour comparer les outils :
 
 - **`licenses`** : Identifiants de licence SPDX pour la conformité.
 
-**Pourquoi 6 SBOM ?** : Chaque outil a ses forces :
+**Pourquoi 4 SBOM ?** : Chaque outil a ses forces :
 
 - **cdxgen** : Meilleur pour l'analyse du code source. Comprend les lockfiles (requirements.txt, package-lock.json).
-- **Syft** : Rapide, précis pour les conteneurs. Détecte les paquets OS + dépendances de langage.
-- **Trivy** : Focus sécurité approfondi. Inclut les données de vulnérabilités dans les métadonnées SBOM.
+- **Trivy** : Focus sécurité approfondi. Gère à la fois la génération SBOM et l'analyse des vulnérabilités. Inclut les données de vulnérabilités dans les métadonnées SBOM.
 - **BuildKit** : SBOM natif Docker. Généré pendant `docker build --sbom=true`.
-
-**Le Benchmark** (`task benchmark`) mesure :
-- Temps d'exécution
-- Utilisation mémoire
-- Nombre de composants
-- Précision de détection des licences
-- Taux de faux positifs
 
 ---
 
@@ -326,7 +285,7 @@ task sbom:sign IMAGE_TAG=${{ github.sha }}
    - Crée : `cosign.key` (privée), `cosign.pub` (publique)
 
 2. Signer le SBOM : `cosign sign-blob --key cosign.key --bundle sbom.json.bundle sbom.json`
-   - Sortie : `sbom-image-syft.json.bundle`
+   - Sortie : `sbom-image-trivy.json.bundle`
 
 3. Le bundle contient :
    - La signature (encodée en base64)
@@ -338,8 +297,8 @@ task sbom:sign IMAGE_TAG=${{ github.sha }}
 ```bash
 cosign verify-blob \
   --key cosign.pub \
-  --bundle sbom-image-syft.json.bundle \
-  sbom-image-syft.json
+  --bundle sbom-image-trivy.json.bundle \
+  sbom-image-trivy.json
 ```
 
 **Sortie** :
@@ -350,7 +309,7 @@ Verified OK
 Si le SBOM est modifié (même en changeant un seul octet), la vérification échoue :
 
 ```bash
-echo "tampering" >> sbom-image-syft.json
+echo "tampering" >> sbom-image-trivy.json
 cosign verify-blob --key cosign.pub --bundle sbom.json.bundle sbom.json
 # Error: invalid signature
 ```
@@ -386,23 +345,18 @@ task sbom:scan:all
 **Commandes exécutées** :
 
 ```bash
-# Scanner le SBOM image avec Grype
-grype sbom:output/sbom/image/sbom-image-syft.json \
-  -o json \
-  --file output/scans/scan-image-grype.json
-
 # Scanner le SBOM image avec Trivy
-trivy sbom output/sbom/image/sbom-image-syft.json \
+trivy sbom output/sbom/image/sbom-image-trivy.json \
   --format json \
   --output output/scans/scan-image-trivy.json
 
-# Scanner le SBOM source avec Grype
-grype sbom:output/sbom/source/sbom-source-cdxgen.json \
-  -o json \
-  --file output/scans/scan-source-grype.json
+# Scanner le SBOM source avec Trivy
+trivy sbom output/sbom/source/sbom-source-cdxgen.json \
+  --format json \
+  --output output/scans/scan-source-trivy.json
 ```
 
-**Exemple de Sortie** (scan-image-grype.json, tronqué) :
+**Exemple de Sortie** (scan-image-trivy.json, tronqué) :
 
 ```json
 {
@@ -447,12 +401,12 @@ grype sbom:output/sbom/source/sbom-source-cdxgen.json \
   "source": {
     "type": "sbom",
     "target": {
-      "userInput": "output/sbom/image/sbom-image-syft.json"
+      "userInput": "output/sbom/image/sbom-image-trivy.json"
     }
   },
   "descriptor": {
-    "name": "grype",
-    "version": "0.107.1",
+    "name": "trivy",
+    "version": "0.69.1",
     "db": {
       "built": "2026-02-09T12:34:01Z",
       "schemaVersion": 5
@@ -481,18 +435,9 @@ grype sbom:output/sbom/source/sbom-source-cdxgen.json \
 
 - **Scan source** : Boucle de feedback rapide pendant le développement. Si `requirements.txt` ajoute un paquet connu-mauvais, fail la PR immédiatement.
 - **Scan image** : Posture de sécurité complète. Détecte les vulnérabilités dans :
-  - Dépendances transitives (Flask → Werkzeug → MarkupSafe)
+  - Dépendances transitives (Flask -> Werkzeug -> MarkupSafe)
   - Image de base (paquets Debian)
   - Bibliothèques système (OpenSSL, zlib)
-
-**Grype vs. Trivy** :
-
-| Outil | Forces | Faiblesses |
-|-------|--------|------------|
-| **Grype** | Rapide, peu de faux positifs, excellent support SBOM | Base de données de vulnérabilités plus petite |
-| **Trivy** | BD complète (inclut malware, secrets), multi-scanner | Peut être bruyant (plus de faux positifs) |
-
-**Bonne Pratique** : Exécutez les deux en CI. Grype pour le gating (strict), Trivy pour la défense en profondeur.
 
 ---
 
@@ -562,7 +507,7 @@ warn contains msg if {
 
 ```
 📋 Évaluation du SBOM contre les politiques...
-   SBOM:     ./output/sbom/image/sbom-image-syft.json
+   SBOM:     ./output/sbom/image/sbom-image-trivy.json
    Policies: ./policies/
 
 ── Règles Deny (bloquantes) ──
@@ -571,7 +516,7 @@ warn contains msg if {
 ── Règles Warn (advisory) ──
    ⚠️  2 avertissements:
       • Licence non approuvée 'LGPL-2.1' dans le composant 'chardet@5.1.0'
-      • Nombre élevé de composants: 2919 - envisagez un nettoyage des dépendances
+      • Nombre élevé de composants: 2967 - envisagez un nettoyage des dépendances
 
 ── Statistiques ──
    Total composants: 2919
@@ -600,80 +545,7 @@ warn contains msg if {
 
 ---
 
-#### 9. **Exécution du Benchmark** (~120 secondes)
-
-```bash
-task benchmark IMAGE_TAG=${{ github.sha }}
-```
-
-**Ce qu'il fait** : Exécute tous les outils de génération SBOM et compare leur performance et précision.
-
-**Métriques Collectées** :
-
-```json
-{
-  "benchmark_results": {
-    "cdxgen": {
-      "execution_time_seconds": 12.4,
-      "memory_mb": 145,
-      "components_found": 22,
-      "with_licenses": 22,
-      "with_purls": 22,
-      "unique_components": 22
-    },
-    "syft_dir": {
-      "execution_time_seconds": 3.8,
-      "memory_mb": 67,
-      "components_found": 35,
-      "with_licenses": 28,
-      "with_purls": 35,
-      "unique_components": 35
-    },
-    "syft_image": {
-      "execution_time_seconds": 8.2,
-      "memory_mb": 112,
-      "components_found": 2919,
-      "with_licenses": 2450,
-      "with_purls": 2900,
-      "unique_components": 2919
-    },
-    "trivy_fs": {
-      "execution_time_seconds": 15.7,
-      "memory_mb": 203,
-      "components_found": 38,
-      "with_licenses": 30,
-      "with_purls": 38,
-      "unique_components": 38
-    },
-    "trivy_image": {
-      "execution_time_seconds": 18.3,
-      "memory_mb": 245,
-      "components_found": 2967,
-      "with_licenses": 2501,
-      "with_purls": 2950,
-      "unique_components": 2967
-    }
-  }
-}
-```
-
-**Analyse** :
-
-| Outil | Vitesse | Précision | Cas d'Usage |
-|-------|---------|-----------|-------------|
-| **Syft (image)** | ⚡⚡⚡ Rapide (8s) | Haute précision | **Recommandé pour CI/CD** |
-| **Trivy (image)** | ⚡⚡ Modéré (18s) | Meilleur rappel | Scan défense en profondeur |
-| **cdxgen** | ⚡ Lent (12s) | Meilleur pour source | Développement, pre-build |
-
-**Pourquoi Benchmark ?**
-
-- **Décisions Éclairées** : Choisir le bon outil pour votre cas d'usage
-- **Tests de Régression** : Détecter si la performance de l'outil se dégrade
-- **Analyse des Coûts** : Outils plus rapides = CI/CD moins cher
-
----
-
-#### 10. **Téléversement des Artefacts** (~15 secondes)
+#### 9. **Téléversement des Artefacts** (~15 secondes)
 
 ```yaml
 - name: Upload artifacts
@@ -694,19 +566,14 @@ output/
 ├── sbom/
 │   ├── source/
 │   │   ├── sbom-source-cdxgen.json
-│   │   ├── sbom-source-trivy.json
-│   │   └── sbom-source-syft.json
+│   │   └── sbom-source-trivy.json
 │   └── image/
-│       ├── sbom-image-syft.json
-│       ├── sbom-image-syft.json.bundle (signature)
 │       ├── sbom-image-trivy.json
+│       ├── sbom-image-trivy.json.bundle (signature)
 │       └── buildkit/
 ├── scans/
-│   ├── scan-image-grype.json
 │   ├── scan-image-trivy.json
-│   └── scan-source-grype.json
-├── benchmark/
-│   └── benchmark-results.json
+│   └── scan-source-trivy.json
 └── cosign.pub (clé publique pour vérification)
 ```
 
@@ -743,7 +610,7 @@ daily-rescan:
 **Ce qu'il fait** :
 
 1. Télécharge le dernier SBOM des artefacts
-2. Rescanne avec Grype et Trivy (en utilisant des bases de données de vulnérabilités fraîches)
+2. Rescanne avec Trivy (en utilisant des bases de données de vulnérabilités fraîches)
 3. Compare les nouveaux résultats aux scans précédents
 4. Alerte si de nouvelles CVE HIGH/CRITICAL sont trouvées
 
@@ -796,7 +663,7 @@ C'est le concept le plus important de ce POC.
 - Fichiers manifestes (`pom.xml`, `build.gradle`, `Cargo.toml`)
 - Scans du système de fichiers (`pip list`, `npm list`)
 
-**Outils** : cdxgen, Syft (mode dir), Trivy (mode fs)
+**Outils** : cdxgen, Trivy (mode fs)
 
 **Exemple** : Pour cette app Python, le SBOM source contient :
 
@@ -825,7 +692,7 @@ C'est le concept le plus important de ce POC.
 
 **Quand** : Généré après la complétion de `docker build`.
 
-**Outils** : Syft (mode image), Trivy (mode image), Docker BuildKit
+**Outils** : Trivy (mode image), Docker BuildKit
 
 **Exemple** : Pour la même app, le SBOM image contient :
 
@@ -1114,8 +981,6 @@ task install:verify
 
 ```
 ✅ Task installed: go-task version v3.36.0
-✅ Syft installed: syft 1.41.2
-✅ Grype installed: grype 0.107.1
 ✅ Trivy installed: trivy 0.69.1
 ✅ cdxgen installed: @cyclonedx/cdxgen 10.9.8
 ✅ Cosign installed: cosign v2.4.1
@@ -1158,10 +1023,8 @@ task sbom:generate:all
 📦 Génération des SBOM Source (tous les outils)...
    ✅ cdxgen → output/sbom/source/sbom-source-cdxgen.json (22 composants)
    ✅ Trivy → output/sbom/source/sbom-source-trivy.json (38 composants)
-   ✅ Syft → output/sbom/source/sbom-source-syft.json (35 composants)
 
 📦 Génération des SBOM Image (tous les outils)...
-   ✅ Syft → output/sbom/image/sbom-image-syft.json (2919 composants)
    ✅ Trivy → output/sbom/image/sbom-image-trivy.json (2967 composants)
    ✅ BuildKit → output/sbom/image/buildkit/ (format SPDX)
 ```
@@ -1183,9 +1046,9 @@ task sbom:sign
 ── Attestation non disponible, fallback vers signature blob ──
    (image non poussée vers registre, ou registre inaccessible)
 
-Using payload from: ./output/sbom/image/sbom-image-syft.json
+Using payload from: ./output/sbom/image/sbom-image-trivy.json
 Signing artifact...
-✅ SBOM signé en tant que blob → ./output/sbom/image/sbom-image-syft.json.bundle
+✅ SBOM signé en tant que blob → ./output/sbom/image/sbom-image-trivy.json.bundle
    ℹ️  Pour de meilleures garanties, poussez l'image vers le registre et utilisez: task sbom:attest
 ```
 
@@ -1199,9 +1062,8 @@ task sbom:scan:all
 
 ```
 🔍 Scan des SBOM pour les vulnérabilités...
-   ✅ Scan image (Grype) → output/scans/scan-image-grype.json (48 vulnérabilités)
    ✅ Scan image (Trivy) → output/scans/scan-image-trivy.json (52 vulnérabilités)
-   ✅ Scan source (Grype) → output/scans/scan-source-grype.json (5 vulnérabilités)
+   ✅ Scan source (Trivy) → output/scans/scan-source-trivy.json (5 vulnérabilités)
 ```
 
 **6. Appliquer les politiques** :
@@ -1214,7 +1076,7 @@ task sbom:policy
 
 ```
 📋 Évaluation du SBOM contre les politiques...
-   SBOM:     ./output/sbom/image/sbom-image-syft.json
+   SBOM:     ./output/sbom/image/sbom-image-trivy.json
    Policies: ./policies/
 
 ── Règles Deny (bloquantes) ──
@@ -1222,7 +1084,7 @@ task sbom:policy
 
 ── Règles Warn (advisory) ──
    ⚠️  1 avertissement:
-      • Nombre élevé de composants: 2919 - envisagez un nettoyage des dépendances
+      • Nombre élevé de composants: 2967 - envisagez un nettoyage des dépendances
 ```
 
 **7. Exécuter le pipeline complet** :
@@ -1237,7 +1099,7 @@ task pipeline
 task pipeline:full
 ```
 
-Cela exécute : `build` → `sbom:generate:all` → `sbom:sign` → `sbom:scan:all` → `sbom:policy` → `benchmark`
+Cela exécute : `build` → `sbom:generate:all` → `sbom:sign` → `sbom:scan:all` → `sbom:policy`
 
 ---
 
@@ -1314,14 +1176,13 @@ env:
 
 1. **Checkout** : Clone le repository
 2. **Install Task** : Télécharge le binaire task depuis https://taskfile.dev
-3. **Install SBOM tools** : Exécute `sudo task install` (Syft, Grype, Trivy, etc.)
+3. **Install SBOM tools** : Exécute `sudo task install` (Trivy, cdxgen, Cosign, etc.)
 4. **Build image** : `task build IMAGE_TAG=9b6f9af`
 5. **Generate SBOMs** : `task sbom:generate:all IMAGE_TAG=9b6f9af`
 6. **Sign SBOM** : `task sbom:sign IMAGE_TAG=9b6f9af`
 7. **Scan vulnerabilities** : `task sbom:scan:all`
 8. **Policy check** : `task sbom:policy`
-9. **Run benchmark** : `task benchmark IMAGE_TAG=9b6f9af`
-10. **Upload artifacts** : Sauvegarde `output/` vers les artefacts GitHub Actions
+9. **Upload artifacts** : Sauvegarde `output/` vers les artefacts GitHub Actions
 
 **Temps d'exécution total** : ~2,5 minutes
 
@@ -1367,8 +1228,6 @@ Le SBOM lui-même ne change pas. Mais la base de données de vulnérabilités se
 sudo task install
 
 # Installer des outils individuels
-sudo task install:syft
-sudo task install:grype
 sudo task install:trivy
 sudo task install:cdxgen
 sudo task install:cosign
@@ -1393,7 +1252,6 @@ task sbom:generate:source
 # Générer le SBOM source (outil spécifique)
 task sbom:generate:source:cdxgen
 task sbom:generate:source:trivy
-task sbom:generate:source:syft
 
 # Générer les SBOM image (tous les outils)
 task sbom:generate:image
@@ -1438,24 +1296,20 @@ task sbom:tamper:test
 ### Scan des Vulnérabilités
 
 ```bash
-# Scanner le SBOM image avec Grype (par défaut)
+# Scanner le SBOM image avec Trivy
 task sbom:scan
 
-# Scanner le SBOM image avec Trivy
-task sbom:scan:trivy
-
-# Scanner le SBOM source
+# Scanner le SBOM source avec Trivy
 task sbom:scan:source
 
-# Scanner source + image avec tous les outils
+# Scanner source + image
 task sbom:scan:all
 ```
 
 **Fichiers de sortie** :
 
-- `output/scans/scan-image-grype.json`
 - `output/scans/scan-image-trivy.json`
-- `output/scans/scan-source-grype.json`
+- `output/scans/scan-source-trivy.json`
 
 ---
 
@@ -1477,7 +1331,7 @@ vim policies/sbom-compliance.rego
 ```bash
 opa eval \
   --data policies/ \
-  --input output/sbom/image/sbom-image-syft.json \
+  --input output/sbom/image/sbom-image-trivy.json \
   'data.sbom.deny'
 ```
 
@@ -1499,11 +1353,8 @@ task dtrack:down
 # Exécuter le pipeline complet (sans build)
 task pipeline
 
-# Exécuter le pipeline complet avec build + benchmark
+# Exécuter le pipeline complet avec build
 task pipeline:full
-
-# Benchmarker tous les outils SBOM
-task benchmark
 ```
 
 ---
@@ -1606,8 +1457,8 @@ sudo task install:cosign
 3. **Problème spécifique à l'outil** : Essayez un outil différent :
 
    ```bash
-   # Si cdxgen échoue, essayez Syft
-   task sbom:generate:source:syft
+   # Si cdxgen échoue, essayez Trivy
+   task sbom:generate:source:trivy
    ```
 
 ---
@@ -1629,7 +1480,7 @@ Pas nécessairement. La plupart des CVE OS ont des scores CVSS < 5.0 (Medium) et
 1. **Filtrer par sévérité** :
 
    ```bash
-   grype sbom.json --fail-on critical --fail-on high
+   trivy sbom sbom.json --severity CRITICAL,HIGH --exit-code 1
    ```
 
 2. **Utiliser des images de base distroless** (pas de shell, pas de gestionnaire de paquets) :
@@ -1741,11 +1592,11 @@ docker login
 ```yaml
 # ❌ MAUVAIS
 - name: Scan
-  run: grype sbom:output/sbom/source/sbom-source-cdxgen.json
+  run: trivy sbom output/sbom/source/sbom-source-cdxgen.json
 
 # ✅ BON
 - name: Scan
-  run: grype sbom:output/sbom/image/sbom-image-syft.json
+  run: trivy sbom output/sbom/image/sbom-image-trivy.json
 ```
 
 ---
@@ -1770,7 +1621,7 @@ run: cosign sign <image>
 
 ### 3. Fixer les Versions des Outils
 
-**Pourquoi** : Builds reproductibles. Si Syft v1.50 introduit un bug, vous voulez rester avec v1.41.
+**Pourquoi** : Builds reproductibles. Si Trivy v0.70 introduit un bug, vous voulez rester avec v0.69.1.
 
 **Comment** :
 
@@ -1778,12 +1629,12 @@ run: cosign sign <image>
 
 ```yaml
 vars:
-  SYFT_VERSION: "1.41.2"
+  TRIVY_VERSION: "0.69.1"
 
 tasks:
-  install:syft:
+  install:trivy:
     cmds:
-      - curl -sSfL https://github.com/anchore/syft/releases/download/v{{.SYFT_VERSION}}/syft_{{.SYFT_VERSION}}_linux_amd64.tar.gz | tar -xz
+      - curl -sSfL https://github.com/aquasecurity/trivy/releases/download/v{{.TRIVY_VERSION}}/trivy_{{.TRIVY_VERSION}}_Linux-64bit.tar.gz | tar -xz
 ```
 
 ---
@@ -1898,7 +1749,7 @@ FROM gcr.io/distroless/python3-debian12
 **Comment** :
 
 ```bash
-grype sbom.json --fail-on critical --fail-on high
+trivy sbom sbom.json --severity CRITICAL,HIGH --exit-code 1
 ```
 
 Si une CVE Critique ou Haute est trouvée, code de sortie 1 (échoue CI/CD).
@@ -1943,8 +1794,6 @@ Dependency-Track fournit :
 
 ### Outils
 
-- **Syft** : https://github.com/anchore/syft
-- **Grype** : https://github.com/anchore/grype
 - **Trivy** : https://github.com/aquasecurity/trivy
 - **cdxgen** : https://github.com/CycloneDX/cdxgen
 - **Cosign** : https://github.com/sigstore/cosign
@@ -1985,7 +1834,6 @@ Licence MIT. Voir le fichier `LICENSE` pour les détails.
 ## Remerciements
 
 Construit avec des outils de :
-- [Anchore](https://anchore.com/) (Syft, Grype)
 - [Aqua Security](https://www.aquasec.com/) (Trivy)
 - [OWASP](https://owasp.org/) (CycloneDX, Dependency-Track)
 - [Sigstore](https://sigstore.dev/) (Cosign)

@@ -78,10 +78,6 @@ stages:
           - script: task sbom:policy
             displayName: 'OPA Policy Check'
 
-          # Benchmark
-          - script: task benchmark IMAGE_TAG=$(IMAGE_TAG)
-            displayName: 'Tool Benchmark'
-
           # Publish outputs
           - task: PublishBuildArtifacts@1
             displayName: 'Publish SBOM Outputs'
@@ -108,9 +104,7 @@ stages:
               sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
             displayName: 'Install Task'
 
-          - script: |
-              sudo task install:grype
-              sudo task install:trivy
+          - script: sudo task install:trivy
             displayName: 'Install Scan Tools'
 
           # Download last SBOM from previous pipeline run
@@ -127,7 +121,7 @@ stages:
             continueOnError: true
 
           - script: |
-              if [ -f "sbom-outputs/sbom/sbom-syft.json" ]; then
+              if [ -f "sbom-outputs/sbom/image/sbom-image-trivy.json" ]; then
                 cp -r sbom-outputs/* output/ 2>/dev/null || true
                 task sbom:scan:all
               else

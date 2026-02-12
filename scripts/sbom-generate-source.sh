@@ -47,17 +47,6 @@ else
     echo "   ⚠️  Trivy not installed, skipping"
 fi
 
-# --- Syft directory mode ---
-if command -v syft &>/dev/null; then
-    echo "── Syft (dir mode) ──"
-    syft "dir:${SOURCE_DIR}" \
-        -o cyclonedx-json="${OUTPUT_DIR}/sbom-source-syft.json" 2>/dev/null
-    COMPONENTS=$(jq '.components | length' "${OUTPUT_DIR}/sbom-source-syft.json" 2>/dev/null || echo "0")
-    echo "   ✅ ${COMPONENTS} components → sbom-source-syft.json"
-    ((GENERATED++))
-else
-    echo "   ⚠️  Syft not installed, skipping"
-fi
 
 echo ""
 

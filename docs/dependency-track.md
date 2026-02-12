@@ -45,7 +45,7 @@ The step in `.github/workflows/supply-chain.yml`:
     apiKey: ${{ secrets.DTRACK_API_KEY }}
     projectName: ${{ env.IMAGE_NAME }}
     projectVersion: ${{ env.IMAGE_TAG }}
-    bomFilename: output/sbom/image/sbom-image-syft.json
+    bomFilename: output/sbom/image/sbom-image-trivy.json
     autoCreate: true
 ```
 
